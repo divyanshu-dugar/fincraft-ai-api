@@ -10,6 +10,7 @@ const incomeCategory = require('./routes/incomeCategory');
 const savingsGoalList = require('./routes/savingsGoalList');
 const budgetRoutes = require('./routes/budget');
 const analytics = require('./routes/analytics'); // ✅ New
+const authRoutes = require('./routes/auth');
 
 const app = express();
 
@@ -17,8 +18,11 @@ const app = express();
 app.use(cors({
   origin: [
     'http://localhost:3000',
-    'https://fincraft-ai-api.vercel.app'
-  ]
+    'https://fincraft-ai-app.vercel.app'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -29,6 +33,7 @@ app.get('/', (req, res) => {
 });
 
 // API Routes
+app.use('/api/auth', authRoutes);
 app.use('/expenses', expense);
 app.use('/expense-categories', expenseCategory);
 app.use('/income', income);
