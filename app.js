@@ -17,8 +17,7 @@ const app = express();
 app.use(cors({
   origin: [
     'http://localhost:3000',
-    'https://ledgerify-client.vercel.app',
-    'https://fincraft-studios.vercel.app'
+    'https://fincraft-ai-api.vercel.app'
   ]
 }));
 app.use(bodyParser.json());
