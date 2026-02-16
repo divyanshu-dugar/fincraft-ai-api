@@ -3,18 +3,23 @@ const passport = require('passport');
 const {
   getIncomeCategories,
   addIncomeCategory,
-  deleteIncomeCategory
+  updateIncomeCategory,
+  deleteIncomeCategory,
 } = require('../controllers/incomeCategory');
 
 const router = express.Router();
+const authenticate = passport.authenticate('jwt', { session: false });
 
 // GET all categories
-router.get('/', passport.authenticate('jwt', { session: false }), getIncomeCategories);
+router.get('/', authenticate, getIncomeCategories);
 
 // POST new category
-router.post('/', passport.authenticate('jwt', { session: false }), addIncomeCategory);
+router.post('/', authenticate, addIncomeCategory);
+
+// PUT update category by id
+router.put('/:id', authenticate, updateIncomeCategory);
 
 // DELETE category by id
-router.delete('/:id', passport.authenticate('jwt', { session: false }), deleteIncomeCategory);
+router.delete('/:id', authenticate, deleteIncomeCategory);
 
 module.exports = router;
