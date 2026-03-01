@@ -10,6 +10,7 @@ const incomeCategory = require('./routes/incomeCategory');
 const savingsGoalList = require('./routes/savingsGoalList');
 const budgetRoutes = require('./routes/budget');
 const analytics = require('./routes/analytics'); // ✅ New
+const aiChat = require('./routes/ai')
 const authRoutes = require('./routes/auth');
 
 const app = express();
@@ -40,6 +41,7 @@ app.use('/income', income);
 app.use('/income-categories', incomeCategory);
 app.use('/saving-goals', savingsGoalList);
 app.use('/budgets', budgetRoutes);
-app.use('/api', analytics); // ✅ New AI route
+app.use('/api', analytics); 
+app.use('/api', aiChat); // ✅ New AI route
 
 module.exports = app;
