@@ -1,20 +1,23 @@
 const express = require("express")
-const axios = require("axios")
 const router = express.Router()
+const aiChatController = require('../controllers/aiChat');
+const passport = require('passport');
 
-router.post("/ai/chat", async(req, res) => {
-    try{
-        const response = await axios.post("http://localhost:8000/api/ai/chat", {
-            userQuery: req.body.userQuery,
-            userId: req.body.userId // Filter data in LLM based on userId for personalized responses
-        })
+const authenticate = passport.authenticate('jwt', { session: false });
 
-        res.json(response.data)
-    }
-    catch(error){
-        console.error(error);
-        res.status(500).json({error: "Failed to fetch AI response"})
-    }
-})
+// Create a new chat session
+router.post("/chat-session", authenticate, aiChatController.createChatSession);
+
+// Get all chat sessions for user
+router.get("/chat-sessions", authenticate, aiChatController.getChatSessions);
+
+// Get messages for a specific session
+router.get("/chat-sessions/:sessionId/messages", authenticate, aiChatController.getSessionMessages);
+
+// Send a message in a session
+router.post("/chat-message", authenticate, aiChatController.sendMessage);
+
+// Delete a chat session
+router.delete("/chat-sessions/:sessionId", authenticate, aiChatController.deleteChatSession);
 
 module.exports = router;
