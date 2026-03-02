@@ -12,7 +12,11 @@ const savingsGoalSchema = new mongoose.Schema({
     priority: { type: String, required: true },
     description: { type: String },
     currentAmount: { type: Number, default: 0 },
-    savedAmount: { type: Number, default: 0, min: 0 }
+    savedAmount: { type: Number, default: 0, min: 0 },
+    embedding: {
+        type: [Number],
+        required: false
+    }
 }, {
     timestamps: true
 });

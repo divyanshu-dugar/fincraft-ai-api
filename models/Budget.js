@@ -47,6 +47,10 @@ const budgetSchema = new mongoose.Schema({
         default: 80, // Percentage
         min: 0,
         max: 100
+    },
+    embedding: {
+        type: [Number],
+        required: false
     }
 }, {
     timestamps: true
