@@ -1,6 +1,7 @@
 const Income = require('../models/Income');
 const IncomeCategory = require('../models/IncomeCategory');
 const mongoose = require('mongoose');
+const generateEmbedding = require('../utils/generateEmbedding');
 
 /**
  * Helper: Resolve category input (either ObjectId string or category name)
@@ -142,12 +143,16 @@ exports.addIncome = async (req, res) => {
       localDate.getDate()
     ));
 
+    const semanticText = `Income of ${amount} for category ${category} on ${date}. Description: ${note || 'None'}`;
+    const embeddingArray = await generateEmbedding(semanticText);
+
     const income = new Income({
       user: req.user._id,
       date: utcDate,
       category: categoryId,
       amount,
       note,
+      embedding: embeddingArray
     });
 
     await income.save();
@@ -201,6 +206,12 @@ exports.editIncome = async (req, res) => {
 
     if (!income)
       return res.status(404).json({ message: 'Income not found' });
+
+    const semanticText = `Income of ${income.amount} for category ${income.category ? income.category.name : 'Unknown'} on ${income.date}. Description: ${income.note || 'None'}`;
+    const embeddingArray = await generateEmbedding(semanticText);
+    
+    income.embedding = embeddingArray;
+    await income.save();
 
     res.json({
       message: 'Income updated successfully',

@@ -3,6 +3,7 @@ const BudgetAlert = require('../models/BudgetAlert');
 const Expense = require('../models/Expense');
 const ExpenseCategory = require('../models/ExpenseCategory');
 const mongoose = require('mongoose');
+const generateEmbedding = require('../utils/generateEmbedding');
 
 /* =============================
    GET ALL BUDGETS (user-specific) WITH OPTIONAL DATE RANGE FILTER
@@ -200,6 +201,9 @@ exports.addBudget = async (req, res) => {
             });
         }
 
+        const semanticText = `Budget "${name}" for ${amount} (${period}). Spans from ${startDate} to ${endDate}. Alerts at ${alertThreshold || 80}%.`;
+        const embeddingArray = await generateEmbedding(semanticText);
+
         const budget = new Budget({
             user: req.user._id,
             name,
@@ -209,7 +213,8 @@ exports.addBudget = async (req, res) => {
             startDate: new Date(startDate),
             endDate: new Date(endDate),
             notifications: notifications !== undefined ? notifications : true,
-            alertThreshold: alertThreshold || 80
+            alertThreshold: alertThreshold || 80,
+            embedding: embeddingArray
         });
 
         await budget.save();
@@ -255,6 +260,12 @@ exports.editBudget = async (req, res) => {
         if (!budget) {
             return res.status(404).json({ message: 'Budget not found' });
         }
+
+        const semanticText = `Budget "${budget.name}" for ${budget.amount} (${budget.period}). Spans from ${budget.startDate} to ${budget.endDate}. Alerts at ${budget.alertThreshold}%.`;
+        const embeddingArray = await generateEmbedding(semanticText);
+        
+        budget.embedding = embeddingArray;
+        await budget.save();
 
         res.json({
             message: 'Budget updated successfully',

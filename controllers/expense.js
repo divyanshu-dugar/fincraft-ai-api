@@ -1,3 +1,4 @@
+const generateEmbedding = require('../utils/generateEmbedding');
 const Expense = require('../models/Expense');
 const ExpenseCategory = require('../models/ExpenseCategory');
 const mongoose = require('mongoose');
@@ -122,25 +123,30 @@ exports.addExpense = async (req, res) => {
 
     const { date, category, amount, note } = req.body;
 
+    
     if (!date || amount == null) {
       return res.status(400).json({ message: 'Date and amount are required' });
     }
-
+    
     if (isNaN(Number(amount))) {
       return res.status(400).json({ message: 'Amount must be a number' });
     }
-
+    
     const categoryId = await resolveCategory(category, req.user._id); // ✅ Added userId
     if (!categoryId) {
       return res.status(400).json({ message: 'Invalid or empty category' });
     }
-
+    
     const localDate = new Date(date);
     const utcDate = new Date(Date.UTC(
       localDate.getFullYear(),
       localDate.getMonth(),
       localDate.getDate()
     ));
+    
+    const semanticText = `Expense of ${amount} for ${category} on ${date}. Description: ${note || 'None'}`;
+
+    const embeddingArray = await generateEmbedding(semanticText);
 
     const expense = new Expense({
       user: req.user._id,
@@ -148,6 +154,7 @@ exports.addExpense = async (req, res) => {
       category: categoryId,
       amount,
       note,
+      embedding: embeddingArray
     });
 
     await expense.save();
@@ -201,6 +208,12 @@ exports.editExpense = async (req, res) => {
 
     if (!expense)
       return res.status(404).json({ message: 'Expense not found' });
+
+    const semanticText = `Expense of ${expense.amount} for ${expense.category ? expense.category.name : 'Unknown'} on ${expense.date}. Description: ${expense.note || 'None'}`;
+    const embeddingArray = await generateEmbedding(semanticText);
+    
+    expense.embedding = embeddingArray;
+    await expense.save();
 
     res.json({
       message: 'Expense updated successfully',
