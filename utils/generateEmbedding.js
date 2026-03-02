@@ -1,3 +1,5 @@
+const OpenAI = require('openai');
+
 /** 
 * Converts a text string into a vector embedding using OpenAI's API.
 * @param {string} text - The input text to be converted into an embedding.
@@ -6,6 +8,10 @@
 
 async function generateEmbedding(text){
     try{
+        const openai = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY
+        });
+
         const response = await openai.embeddings.create({
             model: "text-embedding-3-small",
             input: text
