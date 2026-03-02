@@ -81,7 +81,7 @@ exports.sendMessage = async (req, res) => {
     await userMessage.save();
 
     // Get AI response from Python backend
-    const aiResponse = await axios.post('http://localhost:8000/api/ai/chat', {
+    const aiResponse = await axios.post(`${process.env.AI_SERVICE_URL}/api/ai/chat`, {
       userQuery,
       userId: userId.toString(),
     });
