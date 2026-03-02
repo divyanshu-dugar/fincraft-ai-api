@@ -5,7 +5,8 @@ const router = express.Router()
 router.post("/ai/chat", async(req, res) => {
     try{
         const response = await axios.post("http://localhost:8000/api/ai/chat", {
-            userQuery: req.body.userQuery
+            userQuery: req.body.userQuery,
+            userId: req.body.userId // Filter data in LLM based on userId for personalized responses
         })
 
         res.json(response.data)
