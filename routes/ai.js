@@ -1,9 +1,9 @@
 const express = require("express")
 const router = express.Router()
 const aiChatController = require('../controllers/aiChat');
-const passport = require('passport');
+const requireAuth = require('../auth/require-auth');
 
-const authenticate = passport.authenticate('jwt', { session: false });
+const authenticate = requireAuth();
 
 // Create a new chat session
 router.post("/chat-session", authenticate, aiChatController.createChatSession);

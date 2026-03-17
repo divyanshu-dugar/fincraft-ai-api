@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const passport = require("passport");
+const requireAuth = require('../auth/require-auth');
 const {
   getSavingGoals,
   addSavingGoal,
@@ -10,10 +10,10 @@ const {
 } = require("../controllers/savingsGoalList");
 
 // Protect all routes
-router.get("/", passport.authenticate("jwt", { session: false }), getSavingGoals);
-router.post("/", passport.authenticate("jwt", { session: false }), addSavingGoal);
-router.delete("/:id", passport.authenticate("jwt", { session: false }), deleteSavingGoal);
-router.put("/:id", passport.authenticate("jwt", { session: false }), updateSavingGoal);
-router.put('/:id/save', passport.authenticate('jwt', { session: false }), updateSavedAmount);
+router.get("/", requireAuth(), getSavingGoals);
+router.post("/", requireAuth(), addSavingGoal);
+router.delete("/:id", requireAuth(), deleteSavingGoal);
+router.put("/:id", requireAuth(), updateSavingGoal);
+router.put('/:id/save', requireAuth(), updateSavedAmount);
 
 module.exports = router;

@@ -11,17 +11,17 @@ const {
     getExpensesByCategoryAndDateRange,
     importExpenses
 } = require('../controllers/expense');
-const passport = require("passport")
+const requireAuth = require('../auth/require-auth');
 
 // All routes are protected
-router.get('/', passport.authenticate('jwt', { session: false }), getExpenses);
-router.get('/stats', passport.authenticate('jwt', { session: false }), getExpenseStats);
-router.get('/category/:category', passport.authenticate('jwt', { session: false }), getExpensesByCategory);
-router.get('/category/:category/date-range', passport.authenticate('jwt', { session: false }), getExpensesByCategoryAndDateRange); 
-router.get('/:id', passport.authenticate('jwt', { session: false }), getExpenseById);
-router.post('/', passport.authenticate('jwt', { session: false }), addExpense);
-router.post('/import', passport.authenticate('jwt', { session: false }), importExpenses); 
-router.put('/:id', passport.authenticate('jwt', { session: false }), editExpense);
-router.delete('/:id', passport.authenticate('jwt', { session: false }), deleteExpense);
+router.get('/', requireAuth(), getExpenses);
+router.get('/stats', requireAuth(), getExpenseStats);
+router.get('/category/:category', requireAuth(), getExpensesByCategory);
+router.get('/category/:category/date-range', requireAuth(), getExpensesByCategoryAndDateRange); 
+router.get('/:id', requireAuth(), getExpenseById);
+router.post('/', requireAuth(), addExpense);
+router.post('/import', requireAuth(), importExpenses); 
+router.put('/:id', requireAuth(), editExpense);
+router.delete('/:id', requireAuth(), deleteExpense);
 
 module.exports = router;

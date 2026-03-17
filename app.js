@@ -1,6 +1,9 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const passport = require('passport');
+
+const configurePassport = require('./config/passport');
 
 // Route imports
 const expense = require('./routes/expense');
@@ -14,6 +17,10 @@ const aiChat = require('./routes/ai')
 const authRoutes = require('./routes/auth');
 
 const app = express();
+
+// Passport strategies (JWT always, optional Basic in non-production)
+configurePassport();
+app.use(passport.initialize());
 
 // Middleware
 app.use(cors({

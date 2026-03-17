@@ -1,5 +1,5 @@
 const express = require('express');
-const passport = require('passport');
+const requireAuth = require('../auth/require-auth');
 const {
   getIncomeCategories,
   addIncomeCategory,
@@ -8,7 +8,7 @@ const {
 } = require('../controllers/incomeCategory');
 
 const router = express.Router();
-const authenticate = passport.authenticate('jwt', { session: false });
+const authenticate = requireAuth();
 
 // GET all categories
 router.get('/', authenticate, getIncomeCategories);

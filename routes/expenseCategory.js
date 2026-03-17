@@ -1,5 +1,6 @@
 const express = require('express');
 const passport = require('passport');
+const requireAuth = require('../auth/require-auth');
 const {
   getExpenseCategories,
   addExpenseCategory,
@@ -8,7 +9,7 @@ const {
 } = require('../controllers/expenseCategory');
 
 const router = express.Router();
-const authenticate = passport.authenticate('jwt', { session: false });
+const authenticate = requireAuth();
 
 // GET all categories
 router.get('/', authenticate, getExpenseCategories);
