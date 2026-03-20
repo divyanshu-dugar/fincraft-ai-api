@@ -94,22 +94,36 @@ const updateSavingGoal = async (req, res) => {
 // PUT /saving-goals/:id/save
 const updateSavedAmount = async (req, res) => {
   try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
     const { savedAmount } = req.body;
-    const goal = await SavingsGoalList.findById(req.params.id);
 
-    if (!goal) return res.status(404).json({ message: "Goal not found" });
+    if (savedAmount == null || isNaN(Number(savedAmount))) {
+      return res.status(400).json({ message: "savedAmount must be a number" });
+    }
+    
+    // Update only if owned by user
+    const goal = await SavingsGoalList.findOneAndUpdate(
+      { _id: req.params.id, user: req.user._id },
+      { savedAmount: Number(savedAmount) },
+      { new: true, runValidators: true }
+    );
 
-    goal.savedAmount = savedAmount;
+    if (!goal) {
+      return res.status(404).json({ message: "Savings goal not found or unauthorized" });
+    }
 
     const semanticText = `Saving goal "${goal.name}" target ${goal.amount}, currently saved ${goal.savedAmount || 0} by ${goal.deadline}. Priority: ${goal.priority}. Description: ${goal.description || 'None'}`;
     const embeddingArray = await generateEmbedding(semanticText);
     goal.embedding = embeddingArray;
-
     await goal.save();
 
     res.json(goal);
   } catch (err) {
-    res.status(500).json({ message: "Error updating saved amount" });
+    console.error("Error updating saved amount:", err.message);
+    res.status(500).json({ message: "Error updating saved amount", error: err.message });
   }
 };
 
