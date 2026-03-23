@@ -18,19 +18,60 @@ const authRoutes = require('./routes/auth');
 
 const app = express();
 
+const staticAllowedOrigins = new Set([
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:8081',
+  'http://127.0.0.1:8081',
+  'https://fincraft-ai-app.vercel.app',
+]);
+
+const envAllowedOrigins = (process.env.FRONTEND_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+for (const origin of envAllowedOrigins) {
+  staticAllowedOrigins.add(origin);
+}
+
+function isAllowedOrigin(origin) {
+  if (staticAllowedOrigins.has(origin)) {
+    return true;
+  }
+
+  // Allow localhost and local network web dev servers during development.
+  if (process.env.NODE_ENV !== 'production') {
+    const localDevOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?$/;
+    if (localDevOriginPattern.test(origin)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // Passport strategies (JWT always, optional Basic in non-production)
 configurePassport();
 app.use(passport.initialize());
 
 // Middleware
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'https://fincraft-ai-app.vercel.app'
-  ],
+  origin: (origin, callback) => {
+    // Requests from native apps or tools may not send an Origin header.
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (isAllowedOrigin(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('CORS: Origin not allowed'));
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  credentials: true,
 }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
