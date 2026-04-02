@@ -80,10 +80,23 @@ exports.sendMessage = async (req, res) => {
     });
     await userMessage.save();
 
-    // Get AI response from Python backend
+    // Fetch conversation history for context (last 20 messages)
+    const previousMessages = await ChatMessage.find({ sessionId })
+      .sort({ createdAt: 1 })
+      .limit(20)
+      .lean();
+
+    // Build history (exclude the current message we just saved — it goes as userQuery)
+    const history = previousMessages
+      .filter(msg => msg._id.toString() !== userMessage._id.toString())
+      .map(msg => ({ role: msg.role, content: msg.content }));
+
+    // Get AI response from Python backend with history and current date
     const aiResponse = await axios.post(`${process.env.AI_SERVICE_URL}/api/ai/chat`, {
       userQuery,
       userId: userId.toString(),
+      history,
+      currentDate: new Date().toISOString().split('T')[0],
     });
 
     // Save assistant message

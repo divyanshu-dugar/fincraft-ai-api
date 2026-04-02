@@ -519,6 +519,275 @@ exports.getExpensesByCategoryAndDateRange = async (req, res) => {
 };
 
 /* =============================
+   GET CATEGORY MONTH-ON-MONTH ANALYTICS
+============================= */
+exports.getCategoryMonthComparison = async (req, res) => {
+  try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const startMonthRaw = String(req.query.startMonth || '').trim();
+    const endMonthRaw = String(req.query.endMonth || '').trim();
+    const categoryIdsRaw = String(req.query.categoryIds || '').trim();
+
+    const monthRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
+    if (!monthRegex.test(startMonthRaw) || !monthRegex.test(endMonthRaw)) {
+      return res.status(400).json({
+        error: 'startMonth and endMonth are required in YYYY-MM format',
+      });
+    }
+
+    const [startYear, startMon] = startMonthRaw.split('-').map(Number);
+    const [endYear, endMon] = endMonthRaw.split('-').map(Number);
+
+    const startDate = new Date(Date.UTC(startYear, startMon - 1, 1));
+    const endDate = new Date(Date.UTC(endYear, endMon, 0, 23, 59, 59, 999));
+
+    if (startDate > endDate) {
+      return res.status(400).json({ error: 'startMonth must be less than or equal to endMonth' });
+    }
+
+    const selectedCategoryIds = categoryIdsRaw
+      ? categoryIdsRaw
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+          .map((id) => new mongoose.Types.ObjectId(id))
+      : [];
+
+    const userObjectId = new mongoose.Types.ObjectId(req.user._id);
+
+    const matchStage = {
+      user: userObjectId,
+      date: { $gte: startDate, $lte: endDate },
+    };
+
+    if (selectedCategoryIds.length > 0) {
+      matchStage.category = { $in: selectedCategoryIds };
+    }
+
+    const monthlyAggregates = await Expense.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$date' },
+            month: { $month: '$date' },
+            category: '$category',
+          },
+          amount: { $sum: '$amount' },
+        },
+      },
+      {
+        $lookup: {
+          from: 'expensecategories',
+          localField: '_id.category',
+          foreignField: '_id',
+          as: 'categoryDoc',
+        },
+      },
+      {
+        $addFields: {
+          categoryName: {
+            $ifNull: [{ $arrayElemAt: ['$categoryDoc.name', 0] }, 'Uncategorized'],
+          },
+          categoryIcon: {
+            $ifNull: [{ $arrayElemAt: ['$categoryDoc.icon', 0] }, '💰'],
+          },
+          categoryColor: {
+            $ifNull: [{ $arrayElemAt: ['$categoryDoc.color', 0] }, '#9CA3AF'],
+          },
+          categoryIsParent: {
+            $ifNull: [{ $arrayElemAt: ['$categoryDoc.isParent', 0] }, false],
+          },
+          categoryParentId: {
+            $arrayElemAt: ['$categoryDoc.parentCategory', 0],
+          },
+        },
+      },
+      // look up the parent category (if this is a subcategory)
+      {
+        $lookup: {
+          from: 'expensecategories',
+          localField: 'categoryParentId',
+          foreignField: '_id',
+          as: 'parentDoc',
+        },
+      },
+      {
+        $addFields: {
+          parentName: {
+            $ifNull: [{ $arrayElemAt: ['$parentDoc.name', 0] }, null],
+          },
+          parentIcon: {
+            $ifNull: [{ $arrayElemAt: ['$parentDoc.icon', 0] }, null],
+          },
+          parentColor: {
+            $ifNull: [{ $arrayElemAt: ['$parentDoc.color', 0] }, null],
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          year: '$_id.year',
+          month: '$_id.month',
+          categoryId: '$_id.category',
+          categoryName: 1,
+          categoryIcon: 1,
+          categoryColor: 1,
+          categoryIsParent: 1,
+          parentName: 1,
+          parentIcon: 1,
+          parentColor: 1,
+          amount: { $round: ['$amount', 2] },
+        },
+      },
+      { $sort: { year: 1, month: 1, categoryName: 1 } },
+    ]);
+
+    const months = [];
+    let cursor = new Date(Date.UTC(startYear, startMon - 1, 1));
+    const last = new Date(Date.UTC(endYear, endMon - 1, 1));
+    while (cursor <= last) {
+      months.push(`${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`);
+      cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+    }
+
+    const categoryMap = new Map();
+    for (const row of monthlyAggregates) {
+      const key = String(row.categoryId);
+      if (!categoryMap.has(key)) {
+        categoryMap.set(key, {
+          categoryId: key,
+          categoryName: row.categoryName,
+          categoryIcon: row.categoryIcon || '💰',
+          categoryColor: row.categoryColor || '#9CA3AF',
+          categoryIsParent: row.categoryIsParent || false,
+          parentName: row.parentName || null,
+          parentIcon: row.parentIcon || null,
+          parentColor: row.parentColor || null,
+        });
+      }
+    }
+
+    const categories = Array.from(categoryMap.values()).sort((a, b) =>
+      a.categoryName.localeCompare(b.categoryName)
+    );
+
+    const valueMap = new Map();
+    for (const row of monthlyAggregates) {
+      const monthKey = `${row.year}-${String(row.month).padStart(2, '0')}`;
+      valueMap.set(`${monthKey}__${String(row.categoryId)}`, Number(row.amount || 0));
+    }
+
+    const table = [];
+    const anomalyRows = [];
+    const chartGroupedBars = months.map((month) => ({ month }));
+    const trendLines = [];
+
+    for (const category of categories) {
+      const categorySeries = [];
+
+      for (const month of months) {
+        const amount = Number(valueMap.get(`${month}__${category.categoryId}`) || 0);
+        categorySeries.push({ month, amount });
+      }
+
+      const trendData = [];
+      for (let i = 0; i < categorySeries.length; i += 1) {
+        const current = categorySeries[i];
+        const prev = i > 0 ? categorySeries[i - 1].amount : 0;
+
+        const prevAmounts = categorySeries
+          .slice(Math.max(0, i - 3), i)
+          .map((item) => item.amount);
+        const movingAverage = prevAmounts.length
+          ? prevAmounts.reduce((sum, value) => sum + value, 0) / prevAmounts.length
+          : current.amount;
+
+        const changePct = prev > 0
+          ? ((current.amount - prev) / prev) * 100
+          : current.amount > 0
+            ? 100
+            : 0;
+
+        const isSpike = prevAmounts.length >= 2
+          ? current.amount > movingAverage * 1.5 && current.amount - movingAverage >= 100
+          : false;
+
+        const anomaly = {
+          isSpike,
+          severity: isSpike
+            ? current.amount > movingAverage * 2
+              ? 'high'
+              : 'medium'
+            : 'none',
+          reason: isSpike
+            ? `Amount is ${(current.amount / (movingAverage || 1)).toFixed(2)}x of trailing average`
+            : '',
+        };
+
+        const row = {
+          month: current.month,
+          categoryId: category.categoryId,
+          category: category.categoryName,
+          categoryIcon: category.categoryIcon,
+          categoryColor: category.categoryColor,
+          parentName: category.parentName,
+          parentIcon: category.parentIcon,
+          amount: Number(current.amount.toFixed(2)),
+          changePct: Number(changePct.toFixed(2)),
+          movingAverage: Number(movingAverage.toFixed(2)),
+          anomaly,
+        };
+
+        table.push(row);
+        trendData.push(row);
+        if (anomaly.isSpike) anomalyRows.push(row);
+      }
+
+      trendLines.push({
+        categoryId: category.categoryId,
+        category: category.categoryName,
+        data: trendData,
+      });
+    }
+
+    for (const bar of chartGroupedBars) {
+      for (const category of categories) {
+        const amount = Number(valueMap.get(`${bar.month}__${category.categoryId}`) || 0);
+        bar[category.categoryName] = Number(amount.toFixed(2));
+      }
+    }
+
+    return res.json({
+      range: {
+        startMonth: startMonthRaw,
+        endMonth: endMonthRaw,
+      },
+      categories,
+      months,
+      table,
+      chart: {
+        groupedBars: chartGroupedBars,
+        trendLines,
+      },
+      anomalies: anomalyRows,
+      summary: {
+        totalRows: table.length,
+        anomalyCount: anomalyRows.length,
+      },
+    });
+  } catch (err) {
+    console.error('Error getting category month comparison:', err);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+/* =============================
    IMPORT EXPENSES FROM CSV/EXCEL
 ============================= */
 exports.importExpenses = async (req, res) => {

@@ -11,6 +11,7 @@ const {
     getExpensesByCategory,
     getExpenseStats,
     getExpensesByCategoryAndDateRange,
+  getCategoryMonthComparison,
     importExpenses,
     extractFromImage
 } = require('../controllers/expense');
@@ -48,6 +49,7 @@ const upload = multer({
 // All routes are protected
 router.get('/', requireAuth(), getExpenses);
 router.get('/stats', requireAuth(), getExpenseStats);
+router.get('/analytics/category-month-comparison', requireAuth(), getCategoryMonthComparison);
 router.get('/category/:category', requireAuth(), getExpensesByCategory);
 router.get('/category/:category/date-range', requireAuth(), getExpensesByCategoryAndDateRange); 
 router.get('/:id', requireAuth(), getExpenseById);

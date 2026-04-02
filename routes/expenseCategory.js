@@ -6,12 +6,16 @@ const {
   addExpenseCategory,
   updateExpenseCategory,
   deleteExpenseCategory,
+  seedDefaultCategories,
 } = require('../controllers/expenseCategory');
 
 const router = express.Router();
 const authenticate = requireAuth();
 
-// GET all categories
+// POST seed default categories (must be before /:id to avoid param collision)
+router.post('/seed', authenticate, seedDefaultCategories);
+
+// GET all categories (tree by default, ?flat=true for legacy flat array)
 router.get('/', authenticate, getExpenseCategories);
 
 // POST new category
