@@ -2,6 +2,7 @@ const Income = require('../models/Income');
 const IncomeCategory = require('../models/IncomeCategory');
 const mongoose = require('mongoose');
 const generateEmbedding = require('../utils/generateEmbedding');
+const { toUTCDate, dateRangeFilter } = require('../utils/dateHelpers');
 
 /**
  * Helper: Resolve category input (either ObjectId string or category name)
@@ -60,23 +61,7 @@ exports.getIncomes = async (req, res) => {
     const { startDate, endDate } = req.query;
     
     if (startDate && endDate) {
-      const startLocal = new Date(startDate);
-      const endLocal = new Date(endDate);
-
-      const start = new Date(Date.UTC(
-        startLocal.getFullYear(),
-        startLocal.getMonth(),
-        startLocal.getDate()
-      ));
-
-      const end = new Date(Date.UTC(
-        endLocal.getFullYear(),
-        endLocal.getMonth(),
-        endLocal.getDate(),
-        23, 59, 59, 999
-      ));
-
-      query.date = { $gte: start, $lte: end };
+      query.date = dateRangeFilter(startDate, endDate);
     }
 
     const incomes = await Income.find(query)
@@ -136,12 +121,7 @@ exports.addIncome = async (req, res) => {
       return res.status(400).json({ message: 'Invalid or empty category' });
     }
 
-    const localDate = new Date(date);
-    const utcDate = new Date(Date.UTC(
-      localDate.getFullYear(),
-      localDate.getMonth(),
-      localDate.getDate()
-    ));
+    const utcDate = toUTCDate(date.split('T')[0]);
 
     const semanticText = `Income of ${amount} for category ${category} on ${date}. Description: ${note || 'None'}`;
     const embeddingArray = await generateEmbedding(semanticText);
@@ -188,12 +168,7 @@ exports.editIncome = async (req, res) => {
     const updateObj = { amount, note };
 
     if (date) {
-      const localDate = new Date(date);
-      updateObj.date = new Date(Date.UTC(
-        localDate.getFullYear(),
-        localDate.getMonth(),
-        localDate.getDate()
-      ));
+      updateObj.date = toUTCDate(date.split('T')[0]);
     }
 
     if (categoryId) updateObj.category = categoryId;
@@ -287,25 +262,9 @@ exports.getIncomesByDateRange = async (req, res) => {
     if (!startDate || !endDate)
       return res.status(400).json({ message: 'startDate and endDate required' });
 
-    const startLocal = new Date(startDate);
-    const endLocal = new Date(endDate);
-
-    const start = new Date(Date.UTC(
-      startLocal.getFullYear(),
-      startLocal.getMonth(),
-      startLocal.getDate()
-    ));
-
-    const end = new Date(Date.UTC(
-      endLocal.getFullYear(),
-      endLocal.getMonth(),
-      endLocal.getDate(),
-      23, 59, 59, 999
-    ));
-
     const incomes = await Income.find({
       user: req.user._id,
-      date: { $gte: start, $lte: end },
+      date: dateRangeFilter(startDate, endDate),
     })
       .populate('category', 'name color icon')
       .sort({ date: -1 });
@@ -333,23 +292,7 @@ exports.getIncomeStats = async (req, res) => {
     const { startDate, endDate } = req.query;
     
     if (startDate && endDate) {
-      const startLocal = new Date(startDate);
-      const endLocal = new Date(endDate);
-
-      const start = new Date(Date.UTC(
-        startLocal.getFullYear(),
-        startLocal.getMonth(),
-        startLocal.getDate()
-      ));
-
-      const end = new Date(Date.UTC(
-        endLocal.getFullYear(),
-        endLocal.getMonth(),
-        endLocal.getDate(),
-        23, 59, 59, 999
-      ));
-
-      matchStage.date = { $gte: start, $lte: end };
+      matchStage.date = dateRangeFilter(startDate, endDate);
     }
 
     const categoryStats = await Income.aggregate([
@@ -423,26 +366,10 @@ exports.getIncomesByCategoryAndDateRange = async (req, res) => {
     const categoryId = await resolveIncomeCategory(category, req.user._id);
     if (!categoryId) return res.json([]);
 
-    const startLocal = new Date(startDate);
-    const endLocal = new Date(endDate);
-
-    const start = new Date(Date.UTC(
-      startLocal.getFullYear(),
-      startLocal.getMonth(),
-      startLocal.getDate()
-    ));
-
-    const end = new Date(Date.UTC(
-      endLocal.getFullYear(),
-      endLocal.getMonth(),
-      endLocal.getDate(),
-      23, 59, 59, 999
-    ));
-
     const incomes = await Income.find({
       user: req.user._id,
       category: categoryId,
-      date: { $gte: start, $lte: end },
+      date: dateRangeFilter(startDate, endDate),
     })
       .populate('category', 'name color icon')
       .sort({ date: -1 });

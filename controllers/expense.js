@@ -2,6 +2,7 @@ const generateEmbedding = require('../utils/generateEmbedding');
 const Expense = require('../models/Expense');
 const ExpenseCategory = require('../models/ExpenseCategory');
 const mongoose = require('mongoose');
+const { toUTCDate, dateRangeFilter } = require('../utils/dateHelpers');
 
 /**
  * Helper: Resolve category input (either ObjectId string or category name)
@@ -123,23 +124,7 @@ exports.getExpenses = async (req, res) => {
     const { startDate, endDate } = req.query;
     
     if (startDate && endDate) {
-      const startLocal = new Date(startDate);
-      const endLocal = new Date(endDate);
-
-      const start = new Date(Date.UTC(
-        startLocal.getFullYear(),
-        startLocal.getMonth(),
-        startLocal.getDate()
-      ));
-
-      const end = new Date(Date.UTC(
-        endLocal.getFullYear(),
-        endLocal.getMonth(),
-        endLocal.getDate(),
-        23, 59, 59, 999
-      ));
-
-      query.date = { $gte: start, $lte: end };
+      query.date = dateRangeFilter(startDate, endDate);
     }
 
     const expenses = await Expense.find(query)
@@ -200,12 +185,7 @@ exports.addExpense = async (req, res) => {
       return res.status(400).json({ message: 'Invalid or empty category' });
     }
     
-    const localDate = new Date(date);
-    const utcDate = new Date(Date.UTC(
-      localDate.getFullYear(),
-      localDate.getMonth(),
-      localDate.getDate()
-    ));
+    const utcDate = toUTCDate(date.split('T')[0]);
     
     const semanticText = `Expense of ${amount} for ${category} on ${date}. Description: ${note || 'None'}`;
 
@@ -253,12 +233,7 @@ exports.editExpense = async (req, res) => {
     const updateObj = { amount, note };
 
     if (date) {
-      const localDate = new Date(date);
-      updateObj.date = new Date(Date.UTC(
-        localDate.getFullYear(),
-        localDate.getMonth(),
-        localDate.getDate()
-      ));
+      updateObj.date = toUTCDate(date.split('T')[0]);
     }
 
     if (categoryId) updateObj.category = categoryId;
@@ -398,23 +373,7 @@ exports.getExpenseStats = async (req, res) => {
     const { startDate, endDate } = req.query;
     
     if (startDate && endDate) {
-      const startLocal = new Date(startDate);
-      const endLocal = new Date(endDate);
-
-      const start = new Date(Date.UTC(
-        startLocal.getFullYear(),
-        startLocal.getMonth(),
-        startLocal.getDate()
-      ));
-
-      const end = new Date(Date.UTC(
-        endLocal.getFullYear(),
-        endLocal.getMonth(),
-        endLocal.getDate(),
-        23, 59, 59, 999
-      ));
-
-      matchStage.date = { $gte: start, $lte: end };
+      matchStage.date = dateRangeFilter(startDate, endDate);
     }
 
     const categoryStats = await Expense.aggregate([
