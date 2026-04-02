@@ -327,25 +327,9 @@ exports.getExpensesByDateRange = async (req, res) => {
     if (!startDate || !endDate)
       return res.status(400).json({ message: 'startDate and endDate required' });
 
-    const startLocal = new Date(startDate);
-    const endLocal = new Date(endDate);
-
-    const start = new Date(Date.UTC(
-      startLocal.getFullYear(),
-      startLocal.getMonth(),
-      startLocal.getDate()
-    ));
-
-    const end = new Date(Date.UTC(
-      endLocal.getFullYear(),
-      endLocal.getMonth(),
-      endLocal.getDate(),
-      23, 59, 59, 999
-    ));
-
     const expenses = await Expense.find({
       user: req.user._id,
-      date: { $gte: start, $lte: end },
+      date: dateRangeFilter(startDate, endDate),
     })
       .populate('category', 'name color icon')
       .sort({ date: -1 });
@@ -447,26 +431,10 @@ exports.getExpensesByCategoryAndDateRange = async (req, res) => {
     const categoryId = await resolveCategory(category, req.user._id); // ✅ Added userId
     if (!categoryId) return res.json([]);
 
-    const startLocal = new Date(startDate);
-    const endLocal = new Date(endDate);
-
-    const start = new Date(Date.UTC(
-      startLocal.getFullYear(),
-      startLocal.getMonth(),
-      startLocal.getDate()
-    ));
-
-    const end = new Date(Date.UTC(
-      endLocal.getFullYear(),
-      endLocal.getMonth(),
-      endLocal.getDate(),
-      23, 59, 59, 999
-    ));
-
     const expenses = await Expense.find({
       user: req.user._id,
       category: categoryId,
-      date: { $gte: start, $lte: end },
+      date: dateRangeFilter(startDate, endDate),
     })
       .populate('category', 'name color icon')
       .sort({ date: -1 });
@@ -859,11 +827,7 @@ exports.importExpenses = async (req, res) => {
           continue;
         }
 
-        const utcDate = new Date(Date.UTC(
-          localDate.getFullYear(),
-          localDate.getMonth(),
-          localDate.getDate()
-        ));
+        const utcDate = toUTCDate(date.split('T')[0]);
 
         // Generate semantic text for embedding (same as manual add)
         const semanticText = `Expense of ${amount} for ${categoryKeyRaw} on ${date}. Description: ${note || 'None'}`;
