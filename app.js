@@ -15,6 +15,7 @@ const budgetRoutes = require('./routes/budget');
 const analytics = require('./routes/analytics'); // ✅ New
 const aiChat = require('./routes/ai')
 const authRoutes = require('./routes/auth');
+const profileRoutes = require('./routes/profile');
 
 const app = express();
 
@@ -83,6 +84,7 @@ app.get('/', (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/profile', profileRoutes);
 app.use('/expenses', expense);
 app.use('/expense-categories', expenseCategory);
 app.use('/income', income);
