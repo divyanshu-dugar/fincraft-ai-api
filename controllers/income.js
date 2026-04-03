@@ -379,3 +379,185 @@ exports.getIncomesByCategoryAndDateRange = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+/* =============================
+   GET INCOME CATEGORY MONTH-ON-MONTH ANALYTICS
+============================= */
+exports.getIncomeCategoryMonthComparison = async (req, res) => {
+  try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const startMonthRaw  = String(req.query.startMonth  || '').trim();
+    const endMonthRaw    = String(req.query.endMonth    || '').trim();
+    const categoryIdsRaw = String(req.query.categoryIds || '').trim();
+
+    const monthRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
+    if (!monthRegex.test(startMonthRaw) || !monthRegex.test(endMonthRaw)) {
+      return res.status(400).json({ error: 'startMonth and endMonth are required in YYYY-MM format' });
+    }
+
+    const [startYear, startMon] = startMonthRaw.split('-').map(Number);
+    const [endYear,   endMon  ] = endMonthRaw.split('-').map(Number);
+
+    const startDate = new Date(Date.UTC(startYear, startMon - 1, 1));
+    const endDate   = new Date(Date.UTC(endYear,   endMon,       0, 23, 59, 59, 999));
+
+    if (startDate > endDate) {
+      return res.status(400).json({ error: 'startMonth must be <= endMonth' });
+    }
+
+    const selectedCategoryIds = categoryIdsRaw
+      ? categoryIdsRaw.split(',').map((s) => s.trim()).filter(Boolean)
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+          .map((id) => new mongoose.Types.ObjectId(id))
+      : [];
+
+    const userObjectId = new mongoose.Types.ObjectId(req.user._id);
+
+    const matchStage = {
+      user: userObjectId,
+      date: { $gte: startDate, $lte: endDate },
+    };
+    if (selectedCategoryIds.length > 0) {
+      matchStage.category = { $in: selectedCategoryIds };
+    }
+
+    const monthlyAggregates = await Income.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: { year: { $year: '$date' }, month: { $month: '$date' }, category: '$category' },
+          amount: { $sum: '$amount' },
+        },
+      },
+      {
+        $lookup: {
+          from: 'incomecategories',
+          localField: '_id.category',
+          foreignField: '_id',
+          as: 'categoryDoc',
+        },
+      },
+      {
+        $addFields: {
+          categoryName:  { $ifNull: [{ $arrayElemAt: ['$categoryDoc.name',  0] }, 'Uncategorized'] },
+          categoryIcon:  { $ifNull: [{ $arrayElemAt: ['$categoryDoc.icon',  0] }, '💰'] },
+          categoryColor: { $ifNull: [{ $arrayElemAt: ['$categoryDoc.color', 0] }, '#10B981'] },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          year: '$_id.year',
+          month: '$_id.month',
+          categoryId: '$_id.category',
+          categoryName: 1,
+          categoryIcon: 1,
+          categoryColor: 1,
+          amount: { $round: ['$amount', 2] },
+        },
+      },
+      { $sort: { year: 1, month: 1, categoryName: 1 } },
+    ]);
+
+    // Build full month list
+    const months = [];
+    let cursor = new Date(Date.UTC(startYear, startMon - 1, 1));
+    const last  = new Date(Date.UTC(endYear,  endMon - 1,   1));
+    while (cursor <= last) {
+      months.push(`${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`);
+      cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+    }
+
+    // Category index
+    const categoryMap = {};
+    for (const row of monthlyAggregates) {
+      const id = String(row.categoryId);
+      if (!categoryMap[id]) {
+        categoryMap[id] = {
+          categoryId:    id,
+          categoryName:  row.categoryName,
+          categoryIcon:  row.categoryIcon,
+          categoryColor: row.categoryColor,
+        };
+      }
+    }
+    const categories = Object.values(categoryMap);
+
+    // Group by month key
+    const byMonthKey = {};
+    for (const row of monthlyAggregates) {
+      const key = `${row.year}-${String(row.month).padStart(2, '0')}`;
+      if (!byMonthKey[key]) byMonthKey[key] = {};
+      byMonthKey[key][String(row.categoryId)] = row.amount;
+    }
+
+    // Grouped bars for recharts
+    const groupedBars = months.map((m) => {
+      const entry = { month: m };
+      for (const cat of categories) entry[cat.categoryName] = byMonthKey[m]?.[cat.categoryId] || 0;
+      return entry;
+    });
+
+    // Trend lines
+    const trendLines = categories.map((cat) => ({
+      categoryId:    cat.categoryId,
+      categoryName:  cat.categoryName,
+      categoryColor: cat.categoryColor,
+      data: months.map((m) => ({ month: m, amount: byMonthKey[m]?.[cat.categoryId] || 0 })),
+    }));
+
+    // Table rows with anomaly detection (spike = 50%+ above 3-month trailing avg)
+    const tableRows = monthlyAggregates.map((row) => {
+      const catId = String(row.categoryId);
+      const trailingAmounts = [];
+      let c2 = new Date(Date.UTC(row.year, row.month - 1, 1));
+      for (let i = 0; i < 3; i++) {
+        c2 = new Date(Date.UTC(c2.getUTCFullYear(), c2.getUTCMonth() - 1, 1));
+        const k = `${c2.getUTCFullYear()}-${String(c2.getUTCMonth() + 1).padStart(2, '0')}`;
+        if (byMonthKey[k]?.[catId] != null) trailingAmounts.push(byMonthKey[k][catId]);
+      }
+      const trailing3Avg = trailingAmounts.length
+        ? trailingAmounts.reduce((a, b) => a + b, 0) / trailingAmounts.length
+        : null;
+
+      let anomaly = null;
+      if (trailing3Avg !== null && trailing3Avg > 0) {
+        const pctChange = ((row.amount - trailing3Avg) / trailing3Avg) * 100;
+        if (pctChange >= 50) {
+          anomaly = {
+            pctChange: Math.round(pctChange),
+            severity: pctChange >= 100 ? 'high' : 'medium',
+            reason: `${Math.round(pctChange)}% above 3-month avg ($${trailing3Avg.toFixed(0)})`,
+          };
+        }
+      }
+
+      return {
+        month:         `${row.year}-${String(row.month).padStart(2, '0')}`,
+        category:      row.categoryName,
+        categoryId:    catId,
+        categoryIcon:  row.categoryIcon,
+        categoryColor: row.categoryColor,
+        amount:        row.amount,
+        anomaly,
+      };
+    });
+
+    const anomalies = tableRows.filter((r) => r.anomaly);
+
+    res.json({
+      months,
+      categories,
+      chart: { groupedBars, trendLines },
+      table: tableRows,
+      anomalies,
+      summary: { totalRows: tableRows.length, anomalyCount: anomalies.length },
+    });
+  } catch (err) {
+    console.error('Error getting income category analytics:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
