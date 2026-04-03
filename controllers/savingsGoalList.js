@@ -127,10 +127,82 @@ const updateSavedAmount = async (req, res) => {
   }
 };
 
+// GET /saving-goals/:id
+const getSavingGoal = async (req, res) => {
+  try {
+    const goal = await SavingsGoalList.findOne({ _id: req.params.id, user: req.user._id });
+    if (!goal) {
+      return res.status(404).json({ error: "Savings goal not found or unauthorized" });
+    }
+    res.json(goal);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// POST /saving-goals/:id/contribute
+const addContribution = async (req, res) => {
+  try {
+    const { amount, note } = req.body;
+    const parsedAmount = Number(amount);
+
+    if (!parsedAmount || parsedAmount <= 0) {
+      return res.status(400).json({ error: "Contribution amount must be a positive number." });
+    }
+
+    const goal = await SavingsGoalList.findOne({ _id: req.params.id, user: req.user._id });
+    if (!goal) {
+      return res.status(404).json({ error: "Savings goal not found or unauthorized" });
+    }
+
+    goal.contributions.push({ amount: parsedAmount, note: note || "" });
+    goal.savedAmount = goal.contributions.reduce((sum, c) => sum + c.amount, 0);
+
+    const semanticText = `Saving goal "${goal.name}" target ${goal.amount}, currently saved ${goal.savedAmount} by ${goal.deadline}. Priority: ${goal.priority}. Description: ${goal.description || 'None'}`;
+    goal.embedding = await generateEmbedding(semanticText);
+
+    await goal.save();
+    res.status(201).json(goal);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// DELETE /saving-goals/:goalId/contribute/:contributionId
+const deleteContribution = async (req, res) => {
+  try {
+    const goal = await SavingsGoalList.findOne({ _id: req.params.goalId, user: req.user._id });
+    if (!goal) {
+      return res.status(404).json({ error: "Savings goal not found or unauthorized" });
+    }
+
+    const contribIndex = goal.contributions.findIndex(
+      (c) => c._id.toString() === req.params.contributionId
+    );
+    if (contribIndex === -1) {
+      return res.status(404).json({ error: "Contribution not found" });
+    }
+
+    goal.contributions.splice(contribIndex, 1);
+    goal.savedAmount = goal.contributions.reduce((sum, c) => sum + c.amount, 0);
+
+    const semanticText = `Saving goal "${goal.name}" target ${goal.amount}, currently saved ${goal.savedAmount} by ${goal.deadline}. Priority: ${goal.priority}. Description: ${goal.description || 'None'}`;
+    goal.embedding = await generateEmbedding(semanticText);
+
+    await goal.save();
+    res.json(goal);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 module.exports = {
   getSavingGoals,
+  getSavingGoal,
   addSavingGoal,
   deleteSavingGoal,
   updateSavingGoal,
-  updateSavedAmount
+  updateSavedAmount,
+  addContribution,
+  deleteContribution
 };
