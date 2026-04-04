@@ -635,11 +635,14 @@ exports.getCategoryMonthComparison = async (req, res) => {
           ? prevAmounts.reduce((sum, value) => sum + value, 0) / prevAmounts.length
           : current.amount;
 
-        const changePct = prev > 0
-          ? ((current.amount - prev) / prev) * 100
-          : current.amount > 0
-            ? 100
-            : 0;
+        // first data point has no previous month — return null so UI renders "—"
+        const changePct = i === 0
+          ? null
+          : prev > 0
+            ? ((current.amount - prev) / prev) * 100
+            : current.amount > 0
+              ? 100
+              : 0;
 
         const isSpike = prevAmounts.length >= 2
           ? current.amount > movingAverage * 1.5 && current.amount - movingAverage >= 100
@@ -666,7 +669,7 @@ exports.getCategoryMonthComparison = async (req, res) => {
           parentName: category.parentName,
           parentIcon: category.parentIcon,
           amount: Number(current.amount.toFixed(2)),
-          changePct: Number(changePct.toFixed(2)),
+          changePct: changePct === null ? null : Number(changePct.toFixed(2)),
           movingAverage: Number(movingAverage.toFixed(2)),
           anomaly,
         };
