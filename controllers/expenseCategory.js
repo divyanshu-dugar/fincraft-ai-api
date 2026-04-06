@@ -120,8 +120,8 @@ const addExpenseCategory = async (req, res) => {
     const category = new ExpenseCategory({
       user: req.user._id,
       name: name.trim(),
-      icon: icon || null,
-      color: color || null,
+      ...(icon  ? { icon }  : {}),
+      ...(color ? { color } : {}),
       parentCategory: parentCategory || null,
       isParent: !parentCategory && (isParent === true),
     });
