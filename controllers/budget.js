@@ -2,8 +2,10 @@ const Budget = require('../models/Budget');
 const BudgetAlert = require('../models/BudgetAlert');
 const Expense = require('../models/Expense');
 const ExpenseCategory = require('../models/ExpenseCategory');
+const User = require('../models/User');
 const mongoose = require('mongoose');
 const generateEmbedding = require('../utils/generateEmbedding');
+const { sendBudgetAlertEmail } = require('../utils/email');
 
 /* =============================
    GET ALL BUDGETS (user-specific) WITH OPTIONAL DATE RANGE FILTER
@@ -464,6 +466,9 @@ exports.checkBudgetAlerts = async (req, res) => {
             notifications: true
         }).populate('category', 'name color icon');
 
+        // Fetch user email once for notifications
+        const user = await User.findById(req.user._id).select('email userName').lean();
+
         const newAlerts = [];
 
         for (const budget of budgets) {
@@ -491,6 +496,17 @@ exports.checkBudgetAlerts = async (req, res) => {
                     });
                     await alert.save();
                     newAlerts.push(alert);
+                    // Send email — fire-and-forget so a mail failure never breaks the response
+                    if (user?.email) {
+                        sendBudgetAlertEmail(user.email, user.userName, {
+                            budgetName: budget.name,
+                            type: 'budget_exceeded',
+                            percentage,
+                            currentSpent,
+                            budgetAmount: budget.amount,
+                            category: budget.category?.name,
+                        }).catch((err) => console.error('[BudgetAlert email error]', err.message));
+                    }
                 }
             } else if (percentage === 100) {
                 // Budget limit reached (exactly 100%)
@@ -512,6 +528,16 @@ exports.checkBudgetAlerts = async (req, res) => {
                     });
                     await alert.save();
                     newAlerts.push(alert);
+                    if (user?.email) {
+                        sendBudgetAlertEmail(user.email, user.userName, {
+                            budgetName: budget.name,
+                            type: 'budget_exceeded',
+                            percentage,
+                            currentSpent,
+                            budgetAmount: budget.amount,
+                            category: budget.category?.name,
+                        }).catch((err) => console.error('[BudgetAlert email error]', err.message));
+                    }
                 }
             } else if (percentage >= budget.alertThreshold) {
                 // Budget almost exceeded (80-99%)
@@ -533,6 +559,16 @@ exports.checkBudgetAlerts = async (req, res) => {
                     });
                     await alert.save();
                     newAlerts.push(alert);
+                    if (user?.email) {
+                        sendBudgetAlertEmail(user.email, user.userName, {
+                            budgetName: budget.name,
+                            type: 'budget_almost_exceeded',
+                            percentage,
+                            currentSpent,
+                            budgetAmount: budget.amount,
+                            category: budget.category?.name,
+                        }).catch((err) => console.error('[BudgetAlert email error]', err.message));
+                    }
                 }
             }
         }
