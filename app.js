@@ -14,6 +14,7 @@ const savingsGoalList = require('./routes/savingsGoalList');
 const budgetRoutes = require('./routes/budget');
 const analytics = require('./routes/analytics'); // ✅ New
 const aiChat = require('./routes/ai')
+const recurringExpenseRoutes = require('./routes/recurringExpense');
 const authRoutes = require('./routes/auth');
 const profileRoutes = require('./routes/profile');
 
@@ -93,6 +94,7 @@ app.use('/income', income);
 app.use('/income-categories', incomeCategory);
 app.use('/saving-goals', savingsGoalList);
 app.use('/budgets', budgetRoutes);
+app.use('/recurring-expenses', recurringExpenseRoutes);
 app.use('/api', analytics); 
 app.use('/api', aiChat); // ✅ New AI route
 
