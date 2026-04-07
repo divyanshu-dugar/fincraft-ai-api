@@ -51,6 +51,21 @@ const budgetSchema = new mongoose.Schema({
     embedding: {
         type: [Number],
         required: false
+    },
+    isRecurring: {
+        type: Boolean,
+        default: false
+    },
+    repeatUntil: {
+        type: Date,
+        required: false,
+        default: null
+    },
+    parentBudgetId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Budget',
+        required: false,
+        default: null
     }
 }, {
     timestamps: true

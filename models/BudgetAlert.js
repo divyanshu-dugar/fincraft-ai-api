@@ -40,4 +40,10 @@ const budgetAlertSchema = new mongoose.Schema({
     timestamps: true
 });
 
+// Auto-expire READ alerts after 60 days — unread alerts are never touched
+budgetAlertSchema.index(
+    { updatedAt: 1 },
+    { expireAfterSeconds: 60 * 24 * 60 * 60, partialFilterExpression: { isRead: true } }
+);
+
 module.exports = mongoose.model('BudgetAlert', budgetAlertSchema);

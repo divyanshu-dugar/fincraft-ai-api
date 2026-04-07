@@ -166,7 +166,7 @@ exports.addBudget = async (req, res) => {
             return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { name, amount, period, category, startDate, endDate, notifications, alertThreshold } = req.body;
+        const { name, amount, period, category, startDate, endDate, notifications, alertThreshold, isRecurring, repeatUntil } = req.body;
 
         // Validation
         if (!name || !amount || !category || !startDate || !endDate) {
@@ -216,7 +216,9 @@ exports.addBudget = async (req, res) => {
             endDate: new Date(endDate),
             notifications: notifications !== undefined ? notifications : true,
             alertThreshold: alertThreshold || 80,
-            embedding: embeddingArray
+            embedding: embeddingArray,
+            isRecurring: !!isRecurring,
+            repeatUntil: repeatUntil ? new Date(repeatUntil) : null,
         });
 
         await budget.save();
@@ -287,7 +289,7 @@ exports.deleteBudget = async (req, res) => {
             return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const budget = await Budget.findOneAndDelete({
+        const budget = await Budget.findOne({
             _id: req.params.id,
             user: req.user._id,
         });
@@ -296,8 +298,21 @@ exports.deleteBudget = async (req, res) => {
             return res.status(404).json({ message: 'Budget not found' });
         }
 
-        // Also delete related alerts
-        await BudgetAlert.deleteMany({ budget: req.params.id });
+        // If cascade=true, recursively delete all future successors first
+        if (req.query.cascade === 'true' && budget.isRecurring) {
+            const deleteChain = async (parentId) => {
+                const children = await Budget.find({ parentBudgetId: parentId, user: req.user._id });
+                for (const child of children) {
+                    await deleteChain(child._id);
+                    await BudgetAlert.deleteMany({ budget: child._id });
+                    await Budget.deleteOne({ _id: child._id });
+                }
+            };
+            await deleteChain(budget._id);
+        }
+
+        await Budget.deleteOne({ _id: budget._id });
+        await BudgetAlert.deleteMany({ budget: budget._id });
 
         res.json({ message: 'Budget deleted successfully' });
     } catch (err) {
@@ -628,6 +643,28 @@ exports.markAlertAsRead = async (req, res) => {
 };
 
 /* =============================
+   CLEAR ALERTS (hard delete)
+   DELETE /budgets/alerts        → deletes all read alerts
+   DELETE /budgets/alerts?all=1  → deletes ALL alerts (read + unread)
+============================= */
+exports.clearAlerts = async (req, res) => {
+    try {
+        if (!req.user || !req.user._id) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        const deleteAll = req.query.all === '1';
+        const filter = { user: req.user._id };
+        if (!deleteAll) filter.isRead = true;
+
+        const result = await BudgetAlert.deleteMany(filter);
+        res.json({ message: 'Alerts cleared', deleted: result.deletedCount });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/* =============================
    HELPER: Calculate Budget Spending with Optional Date Range
 ============================= */
 async function calculateBudgetSpending(budget, startDate = null, endDate = null) {
@@ -652,3 +689,206 @@ async function calculateBudgetSpending(budget, startDate = null, endDate = null)
     const expenses = await Expense.find(matchCriteria);
     return expenses.reduce((sum, expense) => sum + expense.amount, 0);
 }
+
+/* =============================
+   HELPER: Calculate next period window
+============================= */
+function calcNextPeriod(period, endDate) {
+    const end = new Date(endDate);
+    let nextStart, nextEnd;
+
+    if (period === 'weekly') {
+        // Start the day after the current end
+        nextStart = new Date(end);
+        nextStart.setUTCDate(nextStart.getUTCDate() + 1);
+        nextEnd = new Date(nextStart);
+        nextEnd.setUTCDate(nextEnd.getUTCDate() + 6);
+    } else if (period === 'monthly') {
+        // First day of the next month
+        const year  = end.getUTCFullYear();
+        const month = end.getUTCMonth(); // 0-indexed; end is already last day of its month
+        nextStart = new Date(Date.UTC(year, month + 1, 1));
+        nextEnd   = new Date(Date.UTC(year, month + 2, 0)); // last day of that next month
+    } else {
+        // yearly
+        const year = end.getUTCFullYear() + 1;
+        nextStart  = new Date(Date.UTC(year, 0,  1));
+        nextEnd    = new Date(Date.UTC(year, 11, 31));
+    }
+
+    return { nextStart, nextEnd };
+}
+
+/* =============================
+   ROLLOVER RECURRING BUDGETS
+============================= */
+/* =============================
+   ROLLOVER RECURRING BUDGETS TO A TARGET DATE
+   POST /budgets/rollover-to  { targetYear, targetMonth }
+   Creates budgets for each recurring chain up to the given month.
+============================= */
+exports.rolloverToTarget = async (req, res) => {
+    try {
+        if (!req.user || !req.user._id) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        const { targetYear, targetMonth } = req.body; // targetMonth is 0-indexed
+        if (targetYear == null || targetMonth == null) {
+            return res.status(400).json({ error: 'targetYear and targetMonth are required' });
+        }
+
+        // Last day of the target month
+        const targetDate = new Date(Date.UTC(Number(targetYear), Number(targetMonth) + 1, 0));
+
+        // Find ALL recurring budgets for this user (active or not — we need the chain heads)
+        const allRecurring = await Budget.find({
+            user: req.user._id,
+            isRecurring: true,
+        }).sort({ startDate: 1 });
+
+        let created = 0;
+        const SAFETY = 36; // max months to chain forward
+
+        for (const baseBudget of allRecurring) {
+            // Walk to the latest node in this budget's chain
+            let current = baseBudget;
+            let iterations = 0;
+
+            while (current.endDate < targetDate && iterations < SAFETY) {
+                iterations++;
+
+                const { nextStart, nextEnd } = calcNextPeriod(current.period, current.endDate);
+
+                // Stop if repeatUntil is set and next period starts after it
+                if (current.repeatUntil && nextStart > new Date(current.repeatUntil)) break;
+
+                // Check if a direct successor already exists
+                const existing = await Budget.findOne({
+                    user: req.user._id,
+                    parentBudgetId: current._id,
+                });
+
+                if (existing) {
+                    current = existing;
+                    continue;
+                }
+
+                // Guard against overlap with any other budget in the same category
+                const overlap = await Budget.findOne({
+                    user: req.user._id,
+                    category: current.category,
+                    isActive: true,
+                    startDate: { $lte: nextEnd },
+                    endDate:   { $gte: nextStart },
+                });
+
+                if (overlap) break;
+
+                const semanticText = `Budget "${current.name}" for ${current.amount} (${current.period}). Spans from ${nextStart.toISOString()} to ${nextEnd.toISOString()}. Alerts at ${current.alertThreshold}%.`;
+                const embeddingArray = await generateEmbedding(semanticText);
+
+                const newBudget = await Budget.create({
+                    user:           req.user._id,
+                    name:           current.name,
+                    amount:         current.amount,
+                    period:         current.period,
+                    category:       current.category,
+                    startDate:      nextStart,
+                    endDate:        nextEnd,
+                    notifications:  current.notifications,
+                    alertThreshold: current.alertThreshold,
+                    isRecurring:    true,
+                    repeatUntil:    current.repeatUntil,
+                    parentBudgetId: current._id,
+                    embedding:      embeddingArray,
+                });
+
+                created++;
+                current = newBudget;
+            }
+        }
+
+        res.json({ message: 'Rollover to target complete', created });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/* =============================
+   ROLLOVER RECURRING BUDGETS
+============================= */
+exports.rolloverRecurringBudgets = async (req, res) => {
+    try {
+        if (!req.user || !req.user._id) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        const now = new Date();
+
+        // Find all recurring budgets that have ended
+        const expiredRecurring = await Budget.find({
+            user: req.user._id,
+            isRecurring: true,
+            isActive: true,
+            endDate: { $lt: now },
+        });
+
+        let rolled = 0;
+
+        for (const budget of expiredRecurring) {
+            const { nextStart, nextEnd } = calcNextPeriod(budget.period, budget.endDate);
+
+            // Stop if repeatUntil is set and the next period starts after it
+            if (budget.repeatUntil && nextStart > new Date(budget.repeatUntil)) {
+                continue;
+            }
+
+            // Check a successor doesn't already exist for this period
+            const successor = await Budget.findOne({
+                user: req.user._id,
+                category: budget.category,
+                parentBudgetId: budget._id,
+                startDate: nextStart,
+            });
+
+            if (successor) continue;
+
+            // Also guard against any overlapping budget for this category
+            const overlap = await Budget.findOne({
+                user: req.user._id,
+                category: budget.category,
+                isActive: true,
+                startDate: { $lte: nextEnd },
+                endDate:   { $gte: nextStart },
+            });
+
+            if (overlap) continue;
+
+            const semanticText = `Budget "${budget.name}" for ${budget.amount} (${budget.period}). Spans from ${nextStart.toISOString()} to ${nextEnd.toISOString()}. Alerts at ${budget.alertThreshold}%.`;
+            const embeddingArray = await generateEmbedding(semanticText);
+
+            await Budget.create({
+                user:            req.user._id,
+                name:            budget.name,
+                amount:          budget.amount,
+                period:          budget.period,
+                category:        budget.category,
+                startDate:       nextStart,
+                endDate:         nextEnd,
+                notifications:   budget.notifications,
+                alertThreshold:  budget.alertThreshold,
+                isRecurring:     true,
+                repeatUntil:     budget.repeatUntil,
+                parentBudgetId:  budget._id,
+                embedding:       embeddingArray,
+            });
+
+            rolled++;
+        }
+
+        res.json({ message: 'Rollover complete', rolled });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};

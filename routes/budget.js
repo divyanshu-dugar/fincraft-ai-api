@@ -9,7 +9,10 @@ const {
     getBudgetStats,
     checkBudgetAlerts,
     getUserAlerts,
-    markAlertAsRead
+    markAlertAsRead,
+    rolloverRecurringBudgets,
+    rolloverToTarget,
+    clearAlerts,
 } = require('../controllers/budget');
 const requireAuth = require('../auth/require-auth');
 
@@ -20,8 +23,11 @@ router.get('/alerts', requireAuth(), getUserAlerts);
 router.get('/check-alerts', requireAuth(), checkBudgetAlerts);
 router.get('/:id', requireAuth(), getBudgetById);
 router.post('/', requireAuth(), addBudget);
+router.post('/rollover', requireAuth(), rolloverRecurringBudgets);
+router.post('/rollover-to', requireAuth(), rolloverToTarget);
 router.put('/:id', requireAuth(), editBudget);
 router.put('/alerts/:id/read', requireAuth(), markAlertAsRead);
+router.delete('/alerts', requireAuth(), clearAlerts);
 router.delete('/:id', requireAuth(), deleteBudget);
 
 module.exports = router;
