@@ -25,7 +25,13 @@ const userSchema = new mongoose.Schema({
     default: 'user'
   },
   resetPasswordToken: String,
-  resetPasswordExpires: Date
+  resetPasswordExpires: Date,
+  refreshTokens: [
+    {
+      tokenHash: { type: String, required: true },
+      expiresAt: { type: Date, required: true },
+    }
+  ],
 }, {
   timestamps: true
 });
@@ -47,6 +53,17 @@ userSchema.methods.createPasswordResetToken = function() {
   const rawToken = crypto.randomBytes(32).toString('hex');
   this.resetPasswordToken = crypto.createHash('sha256').update(rawToken).digest('hex');
   this.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
+  return rawToken;
+};
+
+// Generate a refresh token (returns raw token, pushes hash into the array)
+userSchema.methods.createRefreshToken = function() {
+  const rawToken = crypto.randomBytes(40).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  // Prune expired tokens before pushing
+  this.refreshTokens = this.refreshTokens.filter((t) => t.expiresAt > new Date());
+  this.refreshTokens.push({ tokenHash, expiresAt });
   return rawToken;
 };
 
