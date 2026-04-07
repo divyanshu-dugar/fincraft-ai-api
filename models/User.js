@@ -28,6 +28,10 @@ const userSchema = new mongoose.Schema({
   googleId: { type: String, sparse: true, default: null },
   appleId:  { type: String, sparse: true, default: null },
   avatar:   { type: String, default: null },
+  // Email verification
+  isEmailVerified: { type: Boolean, default: false },
+  emailVerificationToken: String,
+  emailVerificationExpires: Date,
   resetPasswordToken: String,
   resetPasswordExpires: Date,
   refreshTokens: [
@@ -58,6 +62,14 @@ userSchema.methods.createPasswordResetToken = function() {
   const rawToken = crypto.randomBytes(32).toString('hex');
   this.resetPasswordToken = crypto.createHash('sha256').update(rawToken).digest('hex');
   this.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
+  return rawToken;
+};
+
+// Generate an email verification token (returns raw token, stores hash)
+userSchema.methods.createEmailVerificationToken = function() {
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  this.emailVerificationToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+  this.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
   return rawToken;
 };
 

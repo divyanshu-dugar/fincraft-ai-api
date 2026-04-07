@@ -11,6 +11,52 @@ const transporter = nodemailer.createTransport({
 });
 
 /**
+ * Send an email verification link after registration.
+ * @param {string} to       – recipient email
+ * @param {string} token    – raw (unhashed) verification token
+ * @param {string} userName – display name
+ */
+exports.sendVerificationEmail = async (to, token, userName) => {
+  const verifyUrl = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
+
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
+      <div style="text-align: center; margin-bottom: 32px;">
+        <h1 style="color: #1e293b; font-size: 24px; margin: 0;">Fincraft AI</h1>
+        <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Verify your email address</p>
+      </div>
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 32px;">
+        <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 8px;">
+          Hey <strong>${userName}</strong> 👋
+        </p>
+        <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px;">
+          Thanks for signing up! Click the button below to verify your email address and activate your account.
+        </p>
+        <div style="text-align: center; margin: 28px 0;">
+          <a href="${verifyUrl}"
+             style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #10b981, #14b8a6); color: white; text-decoration: none; border-radius: 12px; font-weight: 700; font-size: 15px;">
+            Verify Email Address
+          </a>
+        </div>
+        <p style="color: #94a3b8; font-size: 13px; line-height: 1.5; margin: 0;">
+          This link expires in <strong>24 hours</strong>. If you didn't create a Fincraft AI account, you can safely ignore this email.
+        </p>
+      </div>
+      <p style="color: #cbd5e1; font-size: 12px; text-align: center; margin-top: 24px;">
+        Fincraft AI · Secure Financial Management
+      </p>
+    </div>
+  `;
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || `"Fincraft AI" <${process.env.SMTP_USER}>`,
+    to,
+    subject: 'Verify your Fincraft AI email address',
+    html,
+  });
+};
+
+/**
  * Send a password reset email with a one-time link.
  * @param {string} to    – recipient email
  * @param {string} token – raw (unhashed) reset token

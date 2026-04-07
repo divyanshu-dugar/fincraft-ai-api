@@ -1,7 +1,7 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { sendPasswordResetEmail } = require('../utils/email');
+const { sendPasswordResetEmail, sendVerificationEmail } = require('../utils/email');
 const { OAuth2Client } = require('google-auth-library');
 const appleSignin = require('apple-signin-auth');
 
@@ -42,9 +42,16 @@ exports.registerUser = async (req, res) => {
     }
 
     const newUser = new User({ userName, email, password, role });
+    const rawToken = newUser.createEmailVerificationToken();
     await newUser.save();
 
-    res.status(201).json({ message: "User registered successfully" });
+    try {
+      await sendVerificationEmail(newUser.email, rawToken, userName);
+    } catch (emailErr) {
+      // Don't block registration if email fails — user can resend
+    }
+
+    res.status(201).json({ message: "Registration successful! Please check your email to verify your account." });
   } catch (error) {
     res.status(500).json({ message: "Registration failed", error: error.message });
   }
@@ -60,6 +67,14 @@ exports.loginUser = async (req, res) => {
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
+
+    if (!user.isEmailVerified) {
+      return res.status(403).json({
+        message: "Please verify your email before signing in. Check your inbox or request a new link.",
+        code: "EMAIL_NOT_VERIFIED",
+        email: user.email,
+      });
+    }
 
     // Short-lived access token (15 min)
     const payload = {
@@ -224,6 +239,7 @@ async function handleOAuthUser(req, res, { provider, providerId, email, name, av
     if (user) {
       user[idField] = providerId;
       if (avatar && !user.avatar) user.avatar = avatar;
+      user.isEmailVerified = true; // trust the OAuth provider's email
       await user.save({ validateBeforeSave: false });
     }
   }
@@ -247,6 +263,7 @@ async function handleOAuthUser(req, res, { provider, providerId, email, name, av
       email: email.toLowerCase(),
       [idField]: providerId,
       avatar: avatar || null,
+      isEmailVerified: true, // Google/Apple have already verified the email
       // No password — OAuth user
     });
     await user.save({ validateBeforeSave: false });
@@ -326,5 +343,63 @@ exports.appleOAuth = async (req, res) => {
     });
   } catch (err) {
     res.status(401).json({ message: 'Apple authentication failed', error: err.message });
+  }
+};
+
+// ─── Email Verification ──────────────────────────────────────────────────────
+
+// GET /api/auth/verify-email?token=<raw>
+exports.verifyEmail = async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ message: 'Verification token is required' });
+
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    const user = await User.findOne({
+      emailVerificationToken: hashedToken,
+      emailVerificationExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'Verification link is invalid or has expired' });
+    }
+
+    user.isEmailVerified = true;
+    user.emailVerificationToken = undefined;
+    user.emailVerificationExpires = undefined;
+    await user.save({ validateBeforeSave: false });
+
+    res.json({ message: 'Email verified successfully! You can now sign in.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Email verification failed', error: error.message });
+  }
+};
+
+// POST /api/auth/resend-verification
+// Body: { email }
+exports.resendVerification = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required' });
+
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+
+    // Always return success to prevent email enumeration
+    if (!user || user.isEmailVerified) {
+      return res.json({ message: 'If that account exists and is unverified, a new link has been sent.' });
+    }
+
+    const rawToken = user.createEmailVerificationToken();
+    await user.save({ validateBeforeSave: false });
+
+    try {
+      await sendVerificationEmail(user.email, rawToken, user.userName);
+    } catch (emailErr) {
+      return res.status(500).json({ message: 'Failed to send verification email. Please try again.' });
+    }
+
+    res.json({ message: 'If that account exists and is unverified, a new link has been sent.' });
+  } catch (error) {
+    res.status(500).json({ message: 'Something went wrong', error: error.message });
   }
 };

@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   registerUser, loginUser, refreshAccessToken, logoutUser,
   forgotPassword, resetPassword, googleOAuth, appleOAuth,
+  verifyEmail, resendVerification,
 } = require('../controllers/auth');
 const requireAuth = require('../auth/require-auth');
 
@@ -13,6 +14,8 @@ router.post('/refresh', refreshAccessToken);
 router.post('/logout', logoutUser);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
+router.get('/verify-email', verifyEmail);
+router.post('/resend-verification', resendVerification);
 
 // OAuth routes
 router.post('/oauth/google', googleOAuth);
