@@ -243,18 +243,23 @@ exports.editBudget = async (req, res) => {
         }
 
         const { name, amount, period, category, startDate, endDate, notifications, alertThreshold, isActive } = req.body;
+        // updateScope: 'this' (default) | 'future' | 'all'
+        const updateScope = req.query.updateScope || 'this';
 
+        // Only propagate fields that make sense for recurring siblings
+        // (amounts, name, notifications, threshold — NOT dates, period, or category)
         const updateObj = {};
-        if (name) updateObj.name = name;
-        if (amount) updateObj.amount = amount;
-        if (period) updateObj.period = period;
-        if (category) updateObj.category = category;
-        if (startDate) updateObj.startDate = new Date(startDate);
-        if (endDate) updateObj.endDate = new Date(endDate);
-        if (notifications !== undefined) updateObj.notifications = notifications;
-        if (alertThreshold) updateObj.alertThreshold = alertThreshold;
-        if (isActive !== undefined) updateObj.isActive = isActive;
+        if (name)                          updateObj.name           = name;
+        if (amount)                        updateObj.amount         = amount;
+        if (period)                        updateObj.period         = period;
+        if (category)                      updateObj.category       = category;
+        if (startDate)                     updateObj.startDate      = new Date(startDate);
+        if (endDate)                       updateObj.endDate        = new Date(endDate);
+        if (notifications !== undefined)   updateObj.notifications  = notifications;
+        if (alertThreshold)                updateObj.alertThreshold = alertThreshold;
+        if (isActive !== undefined)        updateObj.isActive       = isActive;
 
+        // Always update this specific budget
         const budget = await Budget.findOneAndUpdate(
             { _id: req.params.id, user: req.user._id },
             updateObj,
@@ -263,6 +268,44 @@ exports.editBudget = async (req, res) => {
 
         if (!budget) {
             return res.status(404).json({ message: 'Budget not found' });
+        }
+
+        // For recurring propagation, only carry over semantic fields (not dates/period)
+        const propagateFields = {};
+        if (name)                        propagateFields.name           = name;
+        if (amount)                      propagateFields.amount         = amount;
+        if (notifications !== undefined) propagateFields.notifications  = notifications;
+        if (alertThreshold)              propagateFields.alertThreshold = alertThreshold;
+
+        if (budget.isRecurring && Object.keys(propagateFields).length > 0 && updateScope !== 'this') {
+            if (updateScope === 'future') {
+                // Walk the chain forward from this budget and update each successor
+                const updateChainForward = async (parentId) => {
+                    const children = await Budget.find({ parentBudgetId: parentId, user: req.user._id });
+                    for (const child of children) {
+                        await Budget.findByIdAndUpdate(child._id, propagateFields);
+                        await updateChainForward(child._id);
+                    }
+                };
+                await updateChainForward(budget._id);
+            } else if (updateScope === 'all') {
+                // Find the root of the chain, then update everything
+                const findRoot = async (b) => {
+                    if (!b.parentBudgetId) return b._id;
+                    const parent = await Budget.findById(b.parentBudgetId);
+                    return parent ? findRoot(parent) : b._id;
+                };
+                const rootId = await findRoot(budget);
+
+                const updateAllInChain = async (budgetId) => {
+                    await Budget.findByIdAndUpdate(budgetId, propagateFields);
+                    const children = await Budget.find({ parentBudgetId: budgetId, user: req.user._id });
+                    for (const child of children) {
+                        await updateAllInChain(child._id);
+                    }
+                };
+                await updateAllInChain(rootId);
+            }
         }
 
         const semanticText = `Budget "${budget.name}" for ${budget.amount} (${budget.period}). Spans from ${budget.startDate} to ${budget.endDate}. Alerts at ${budget.alertThreshold}%.`;
