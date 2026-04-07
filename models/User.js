@@ -17,13 +17,17 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: true
+    required: false, // OAuth users have no password
   },
   role: {
     type: String,
     enum: ['user', 'admin'],
     default: 'user'
   },
+  // OAuth identifiers
+  googleId: { type: String, sparse: true, default: null },
+  appleId:  { type: String, sparse: true, default: null },
+  avatar:   { type: String, default: null },
   resetPasswordToken: String,
   resetPasswordExpires: Date,
   refreshTokens: [
@@ -36,15 +40,16 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Hash password before saving
+// Hash password before saving (only when password is present and modified)
 userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
+  if (!this.password || !this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
-// Compare password method
+// Compare password method (safe for OAuth users with no password)
 userSchema.methods.comparePassword = async function(candidatePassword) {
+  if (!this.password) return false;
   return await bcrypt.compare(candidatePassword, this.password);
 };
 

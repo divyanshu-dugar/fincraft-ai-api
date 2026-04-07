@@ -2,6 +2,10 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { sendPasswordResetEmail } = require('../utils/email');
+const { OAuth2Client } = require('google-auth-library');
+const appleSignin = require('apple-signin-auth');
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const REFRESH_COOKIE_NAME = 'refresh_token';
 const REFRESH_COOKIE_OPTIONS = {
@@ -199,5 +203,128 @@ exports.resetPassword = async (req, res) => {
     res.json({ message: "Password has been reset successfully" });
   } catch (error) {
     res.status(500).json({ message: "Password reset failed", error: error.message });
+  }
+};
+
+// ─── shared OAuth helper ────────────────────────────────────────────────────
+
+/**
+ * Find-or-create a user from a verified OAuth identity, then issue tokens.
+ * @param {object} identity - { provider, providerId, email, name, avatar }
+ */
+async function handleOAuthUser(req, res, { provider, providerId, email, name, avatar }) {
+  const idField = provider === 'google' ? 'googleId' : 'appleId';
+
+  // 1. Try to find by provider ID (stable across sessions)
+  let user = await User.findOne({ [idField]: providerId });
+
+  // 2. Fall back to email match (links existing email/password account)
+  if (!user && email) {
+    user = await User.findOne({ email: email.toLowerCase() });
+    if (user) {
+      user[idField] = providerId;
+      if (avatar && !user.avatar) user.avatar = avatar;
+      await user.save({ validateBeforeSave: false });
+    }
+  }
+
+  // 3. Create a brand-new user
+  if (!user) {
+    // Derive a unique userName from the email prefix or display name
+    let baseUserName = (name || email.split('@')[0])
+      .replace(/[^a-zA-Z0-9_]/g, '')
+      .slice(0, 20) || 'user';
+
+    let userName = baseUserName;
+    let attempt = 0;
+    while (await User.exists({ userName })) {
+      attempt++;
+      userName = `${baseUserName}${attempt}`;
+    }
+
+    user = new User({
+      userName,
+      email: email.toLowerCase(),
+      [idField]: providerId,
+      avatar: avatar || null,
+      // No password — OAuth user
+    });
+    await user.save({ validateBeforeSave: false });
+  }
+
+  // 4. Issue JWT + rotate refresh token (same as regular login)
+  const payload = { _id: user._id, userName: user.userName, role: user.role };
+  const token = signAccessToken(payload);
+  const rawRefresh = user.createRefreshToken();
+  await user.save({ validateBeforeSave: false });
+
+  const REFRESH_COOKIE_OPTIONS = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: '/api/auth',
+  };
+
+  res.cookie('refresh_token', rawRefresh, REFRESH_COOKIE_OPTIONS);
+  res.json({ message: 'OAuth login successful', token, role: user.role });
+}
+
+// ─── Google OAuth ───────────────────────────────────────────────────────────
+// POST /api/auth/oauth/google
+// Body: { credential }  (the ID token from Google Identity Services)
+exports.googleOAuth = async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) return res.status(400).json({ message: 'Google credential is required' });
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+
+    await handleOAuthUser(req, res, {
+      provider:   'google',
+      providerId: payload.sub,
+      email:      payload.email,
+      name:       payload.name,
+      avatar:     payload.picture,
+    });
+  } catch (err) {
+    res.status(401).json({ message: 'Google authentication failed', error: err.message });
+  }
+};
+
+// ─── Apple OAuth ────────────────────────────────────────────────────────────
+// POST /api/auth/oauth/apple
+// Body: { idToken, email?, name? }
+// Note: Apple only returns email and name on the VERY FIRST authorization.
+// Store them in the user record; subsequent logins identify by sub.
+exports.appleOAuth = async (req, res) => {
+  try {
+    const { idToken, email, name } = req.body;
+    if (!idToken) return res.status(400).json({ message: 'Apple idToken is required' });
+
+    const payload = await appleSignin.verifyIdToken(idToken, {
+      audience: process.env.APPLE_SERVICE_ID,
+      ignoreExpiration: false,
+    });
+
+    // Apple email may come from the JWT payload or from the first-login body param
+    const resolvedEmail = payload.email || email;
+    if (!resolvedEmail) {
+      return res.status(400).json({ message: 'Email is required for first-time Apple sign-in' });
+    }
+
+    await handleOAuthUser(req, res, {
+      provider:   'apple',
+      providerId: payload.sub,
+      email:      resolvedEmail,
+      name:       name || null,
+      avatar:     null, // Apple doesn't provide an avatar
+    });
+  } catch (err) {
+    res.status(401).json({ message: 'Apple authentication failed', error: err.message });
   }
 };
