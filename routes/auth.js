@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
   registerUser, loginUser, refreshAccessToken, logoutUser,
-  forgotPassword, resetPassword, googleOAuth, appleOAuth,
+  forgotPassword, resetPassword, googleOAuth,
   verifyEmail, resendVerification,
 } = require('../controllers/auth');
 const requireAuth = require('../auth/require-auth');
@@ -19,7 +19,6 @@ router.post('/resend-verification', resendVerification);
 
 // OAuth routes
 router.post('/oauth/google', googleOAuth);
-router.post('/oauth/apple',  appleOAuth);
 
 // Simple authenticated "who am I" endpoint (JWT by default; Basic in dev/tests)
 router.get('/me', requireAuth(), (req, res) => {
