@@ -28,6 +28,16 @@ const userSchema = new mongoose.Schema({
   googleId: { type: String, sparse: true, default: null },
   appleId:  { type: String, sparse: true, default: null },
   avatar:   { type: String, default: null },
+  // Multi-currency preferences
+  defaultCurrency: { type: String, default: 'USD' },
+  currencies: {
+    type: [{
+      code:   { type: String, required: true },
+      symbol: { type: String, required: true },
+      name:   { type: String, required: true },
+    }],
+    default: [{ code: 'USD', symbol: '$', name: 'US Dollar' }],
+  },
   // Email verification
   isEmailVerified: { type: Boolean, default: false },
   emailVerificationToken: String,

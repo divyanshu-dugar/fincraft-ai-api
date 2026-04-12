@@ -150,3 +150,53 @@ exports.deleteAccount = async (req, res) => {
     res.status(500).json({ message: 'Failed to delete account', error: err.message });
   }
 };
+
+/**
+ * PATCH /api/profile/currencies
+ * Body: { currencies: [{ code, symbol, name }], defaultCurrency: string }
+ * Replaces the user's currency list and/or default currency in one call.
+ */
+exports.updateCurrencies = async (req, res) => {
+  try {
+    const { currencies, defaultCurrency } = req.body;
+
+    if (!currencies && !defaultCurrency) {
+      return res.status(400).json({ message: 'Provide currencies or defaultCurrency' });
+    }
+
+    if (currencies !== undefined) {
+      if (!Array.isArray(currencies) || currencies.length === 0) {
+        return res.status(400).json({ message: 'currencies must be a non-empty array' });
+      }
+      const valid = currencies.every(
+        (c) => typeof c.code === 'string' && typeof c.symbol === 'string' && typeof c.name === 'string'
+      );
+      if (!valid) {
+        return res.status(400).json({ message: 'Each currency must have code, symbol, and name' });
+      }
+    }
+
+    const updates = {};
+    if (currencies) updates.currencies = currencies;
+    if (defaultCurrency) {
+      // defaultCurrency must exist in the final currencies list
+      const finalCurrencies = currencies ?? (await User.findById(req.user._id).select('currencies')).currencies;
+      const exists = finalCurrencies.some((c) => c.code === defaultCurrency);
+      if (!exists) {
+        return res.status(400).json({ message: 'defaultCurrency must be in the currencies list' });
+      }
+      updates.defaultCurrency = defaultCurrency;
+    }
+
+    const updated = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: updates },
+      { new: true }
+    ).select('currencies defaultCurrency');
+
+    res.json({ message: 'Currency preferences updated', currencies: updated.currencies, defaultCurrency: updated.defaultCurrency });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update currencies', error: err.message });
+  }
+};
+

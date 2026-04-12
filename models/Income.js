@@ -14,6 +14,7 @@ const incomeSchema = new mongoose.Schema(
       required: true,
     },
     amount: { type: Number, required: true },
+    currency: { type: String, default: 'USD' },
     note: { type: String },
     embedding: {
       type: [Number],
