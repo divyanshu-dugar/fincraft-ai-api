@@ -13,7 +13,10 @@ const {
     getExpensesByCategoryAndDateRange,
   getCategoryMonthComparison,
     importExpenses,
-    extractFromImage
+    extractFromImage,
+    bulkDeleteExpenses,
+    bulkRecategorize,
+    bulkEditDate
 } = require('../controllers/expense');
 const requireAuth = require('../auth/require-auth');
 
@@ -56,6 +59,9 @@ router.get('/:id', requireAuth(), getExpenseById);
 router.post('/', requireAuth(), addExpense);
 router.post('/import', requireAuth(), importExpenses);
 router.post('/extract-from-image', requireAuth(), upload.single('image'), extractFromImage);
+router.post('/bulk-delete', requireAuth(), bulkDeleteExpenses);
+router.post('/bulk-recategorize', requireAuth(), bulkRecategorize);
+router.post('/bulk-edit-date', requireAuth(), bulkEditDate);
 router.put('/:id', requireAuth(), editExpense);
 router.delete('/:id', requireAuth(), deleteExpense);
 

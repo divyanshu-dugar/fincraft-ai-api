@@ -948,3 +948,117 @@ exports.extractFromImage = async (req, res) => {
     });
   }
 };
+
+/* =============================
+   BULK DELETE EXPENSES
+============================= */
+exports.bulkDeleteExpenses = async (req, res) => {
+  try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+
+    // Validate all IDs are valid ObjectIds
+    const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length === 0) {
+      return res.status(400).json({ error: 'No valid expense IDs provided' });
+    }
+
+    const result = await Expense.deleteMany({
+      _id: { $in: validIds },
+      user: req.user._id,
+    });
+
+    res.json({
+      message: `${result.deletedCount} expense(s) deleted successfully`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* =============================
+   BULK RECATEGORIZE EXPENSES
+============================= */
+exports.bulkRecategorize = async (req, res) => {
+  try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { ids, categoryId } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+    if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {
+      return res.status(400).json({ error: 'Valid categoryId is required' });
+    }
+
+    // Verify the category belongs to the user
+    const category = await ExpenseCategory.findOne({
+      _id: categoryId,
+      user: req.user._id,
+    });
+    if (!category) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
+    const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id));
+
+    const result = await Expense.updateMany(
+      { _id: { $in: validIds }, user: req.user._id },
+      { $set: { category: categoryId } }
+    );
+
+    res.json({
+      message: `${result.modifiedCount} expense(s) recategorized`,
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* =============================
+   BULK EDIT DATES
+============================= */
+exports.bulkEditDate = async (req, res) => {
+  try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { ids, date } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+    if (!date) {
+      return res.status(400).json({ error: 'date is required' });
+    }
+
+    const utcDate = toUTCDate(date);
+    if (!utcDate || isNaN(utcDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid date format' });
+    }
+
+    const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id));
+
+    const result = await Expense.updateMany(
+      { _id: { $in: validIds }, user: req.user._id },
+      { $set: { date: utcDate } }
+    );
+
+    res.json({
+      message: `${result.modifiedCount} expense(s) updated`,
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
