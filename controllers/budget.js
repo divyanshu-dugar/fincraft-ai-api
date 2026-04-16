@@ -7,6 +7,12 @@ const mongoose = require('mongoose');
 const generateEmbedding = require('../utils/generateEmbedding');
 const { sendBudgetAlertEmail } = require('../utils/email');
 
+/** Strip time component — returns a Date at UTC midnight for accurate day counting. */
+function toDateOnly(d) {
+    const dt = new Date(d);
+    return new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+}
+
 /* =============================
    GET ALL BUDGETS (user-specific) WITH OPTIONAL DATE RANGE FILTER
 ============================= */
@@ -67,8 +73,8 @@ exports.getBudgets = async (req, res) => {
                 const currentSpent = expenses.reduce((sum, expense) => sum + expense.amount, 0);
                 
                 // Calculate proportional budget
-                const budgetTotalDays = (new Date(budget.endDate) - new Date(budget.startDate)) / (1000 * 60 * 60 * 24) + 1;
-                const queryDays = (spendingEndDate - spendingStartDate) / (1000 * 60 * 60 * 24) + 1;
+                const budgetTotalDays = (toDateOnly(budget.endDate) - toDateOnly(budget.startDate)) / (1000 * 60 * 60 * 24) + 1;
+                const queryDays = (toDateOnly(spendingEndDate) - toDateOnly(spendingStartDate)) / (1000 * 60 * 60 * 24) + 1;
                 const proportionalBudget = (budget.amount * queryDays) / budgetTotalDays;
                 
                 const percentage = proportionalBudget > 0 ? (currentSpent / proportionalBudget) * 100 : 0;
@@ -137,9 +143,9 @@ exports.getBudgetById = async (req, res) => {
         
         // Calculate budget status
         let status = 'on_track';
-        if (currentSpent > proportionalBudget) {
+        if (currentSpent > budget.amount) {
             status = 'exceeded';
-        } else if (Math.abs(currentSpent - proportionalBudget) < 0.0001 || percentage === 100) {
+        } else if (Math.abs(currentSpent - budget.amount) < 0.0001 || percentage === 100) {
             // Allow for floating point rounding
             status = 'limit_reached';
         } else if (percentage >= budget.alertThreshold) {
@@ -456,8 +462,8 @@ exports.getBudgetStats = async (req, res) => {
                 const spentAmount = currentSpent.length > 0 ? currentSpent[0].total : 0;
                 
                 // Calculate the proportional budget amount for the date range
-                const budgetTotalDays = (new Date(budget.endDate) - new Date(budget.startDate)) / (1000 * 60 * 60 * 24) + 1;
-                const queryDays = (spendingEndDate - spendingStartDate) / (1000 * 60 * 60 * 24) + 1;
+                const budgetTotalDays = (toDateOnly(budget.endDate) - toDateOnly(budget.startDate)) / (1000 * 60 * 60 * 24) + 1;
+                const queryDays = (toDateOnly(spendingEndDate) - toDateOnly(spendingStartDate)) / (1000 * 60 * 60 * 24) + 1;
                 const proportionalBudget = (budget.amount * queryDays) / budgetTotalDays;
                 
                 const percentage = proportionalBudget > 0 ? (spentAmount / proportionalBudget) * 100 : 0;
