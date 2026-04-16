@@ -84,10 +84,10 @@ userSchema.methods.createEmailVerificationToken = function() {
 };
 
 // Generate a refresh token (returns raw token, pushes hash into the array)
-userSchema.methods.createRefreshToken = function() {
+userSchema.methods.createRefreshToken = function(ttlMs = 30 * 24 * 60 * 60 * 1000) {
   const rawToken = crypto.randomBytes(40).toString('hex');
   const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  const expiresAt = new Date(Date.now() + ttlMs);
   // Prune expired tokens before pushing
   this.refreshTokens = this.refreshTokens.filter((t) => t.expiresAt > new Date());
   this.refreshTokens.push({ tokenHash, expiresAt });
