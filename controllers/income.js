@@ -10,35 +10,59 @@ const { toUTCDate, dateRangeFilter } = require('../utils/dateHelpers');
 async function resolveIncomeCategory(categoryInput, userId) {
   if (!categoryInput) return null;
 
-  // If ObjectId-like, check existence (within user's categories)
+  // Ensure userId is a valid ObjectId
+  if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) {
+    console.error(`[resolveIncomeCategory] FAIL: userId is not a valid ObjectId: "${userId}"`);
+    return null;
+  }
+
+  const userObjectId = (userId instanceof mongoose.Types.ObjectId)
+    ? userId
+    : new mongoose.Types.ObjectId(String(userId));
+
+  // If ObjectId-like, check existence (within user's categories ONLY)
   if (mongoose.Types.ObjectId.isValid(String(categoryInput))) {
     const cat = await IncomeCategory.findOne({
-      _id: String(categoryInput),
-      user: userId,
+      _id: new mongoose.Types.ObjectId(String(categoryInput)),
+      user: userObjectId,
     });
     if (cat) return cat._id;
+    return null;
   }
 
   // Otherwise, treat input as a name (case-insensitive)
-  const name = String(categoryInput).trim();
+  const name = String(categoryInput).trim().replace(/\s+/g, ' ');
   if (!name) return null;
 
   const existing = await IncomeCategory.findOne({
-    user: userId,
+    user: userObjectId,
     name: { $regex: `^${escapeRegExp(name)}$`, $options: 'i' },
   });
 
   if (existing) return existing._id;
 
   // If not found, create a new one for this user
-  const newCat = new IncomeCategory({
-    user: userId,
-    name,
-    color: '#10B981',
-    icon: '💰',
-  });
-  await newCat.save();
-  return newCat._id;
+  try {
+    const newCat = new IncomeCategory({
+      user: userObjectId,
+      name,
+      color: '#10B981',
+      icon: '💰',
+    });
+    await newCat.save();
+    return newCat._id;
+  } catch (error) {
+    // Handle E11000 duplicate key error - race condition where another process created it
+    if (error.code === 11000) {
+      const retryFind = await IncomeCategory.findOne({
+        user: userObjectId,
+        name: { $regex: `^${escapeRegExp(name)}$`, $options: 'i' },
+      });
+      if (retryFind) return retryFind._id;
+      return null;
+    }
+    throw error;
+  }
 }
 
 function escapeRegExp(string) {
@@ -509,44 +533,71 @@ exports.getIncomeCategoryMonthComparison = async (req, res) => {
       data: months.map((m) => ({ month: m, amount: byMonthKey[m]?.[cat.categoryId] || 0 })),
     }));
 
-    // Table rows with anomaly detection (spike = 50%+ above 3-month trailing avg)
-    const tableRows = monthlyAggregates.map((row) => {
-      const catId = String(row.categoryId);
-      const trailingAmounts = [];
-      let c2 = new Date(Date.UTC(row.year, row.month - 1, 1));
-      for (let i = 0; i < 3; i++) {
-        c2 = new Date(Date.UTC(c2.getUTCFullYear(), c2.getUTCMonth() - 1, 1));
-        const k = `${c2.getUTCFullYear()}-${String(c2.getUTCMonth() + 1).padStart(2, '0')}`;
-        if (byMonthKey[k]?.[catId] != null) trailingAmounts.push(byMonthKey[k][catId]);
+    // Table rows with changePct, movingAverage, and anomaly detection
+    const tableRows = [];
+    const anomalyRows = [];
+
+    for (const cat of categories) {
+      const catId = cat.categoryId;
+      const categorySeries = months.map((m) => ({
+        month: m,
+        amount: byMonthKey[m]?.[catId] || 0,
+      }));
+
+      for (let i = 0; i < categorySeries.length; i++) {
+        const current = categorySeries[i];
+        const prev = i > 0 ? categorySeries[i - 1].amount : 0;
+
+        const prevAmounts = categorySeries
+          .slice(Math.max(0, i - 3), i)
+          .map((item) => item.amount);
+        const movingAverage = prevAmounts.length
+          ? prevAmounts.reduce((sum, value) => sum + value, 0) / prevAmounts.length
+          : current.amount;
+
+        // first data point has no previous month — return null so UI renders "—"
+        const changePct = i === 0
+          ? null
+          : prev > 0
+            ? ((current.amount - prev) / prev) * 100
+            : current.amount > 0
+              ? 100
+              : 0;
+
+        const isSpike = prevAmounts.length >= 2
+          ? current.amount > movingAverage * 1.5 && current.amount - movingAverage >= 100
+          : false;
+
+        const anomaly = {
+          isSpike,
+          severity: isSpike
+            ? current.amount > movingAverage * 2
+              ? 'high'
+              : 'medium'
+            : 'none',
+          reason: isSpike
+            ? `Amount is ${(current.amount / (movingAverage || 1)).toFixed(2)}x of trailing average`
+            : '',
+        };
+
+        const row = {
+          month: current.month,
+          category: cat.categoryName,
+          categoryId: catId,
+          categoryIcon: cat.categoryIcon,
+          categoryColor: cat.categoryColor,
+          amount: Number(current.amount.toFixed(2)),
+          changePct: changePct === null ? null : Number(changePct.toFixed(2)),
+          movingAverage: Number(movingAverage.toFixed(2)),
+          anomaly,
+        };
+
+        tableRows.push(row);
+        if (anomaly.isSpike) anomalyRows.push(row);
       }
-      const trailing3Avg = trailingAmounts.length
-        ? trailingAmounts.reduce((a, b) => a + b, 0) / trailingAmounts.length
-        : null;
+    }
 
-      let anomaly = null;
-      if (trailing3Avg !== null && trailing3Avg > 0) {
-        const pctChange = ((row.amount - trailing3Avg) / trailing3Avg) * 100;
-        if (pctChange >= 50) {
-          anomaly = {
-            pctChange: Math.round(pctChange),
-            severity: pctChange >= 100 ? 'high' : 'medium',
-            reason: `${Math.round(pctChange)}% above 3-month avg ($${trailing3Avg.toFixed(0)})`,
-          };
-        }
-      }
-
-      return {
-        month:         `${row.year}-${String(row.month).padStart(2, '0')}`,
-        category:      row.categoryName,
-        categoryId:    catId,
-        categoryIcon:  row.categoryIcon,
-        categoryColor: row.categoryColor,
-        amount:        row.amount,
-        anomaly,
-      };
-    });
-
-    const anomalies = tableRows.filter((r) => r.anomaly);
+    const anomalies = anomalyRows;
 
     res.json({
       months,
@@ -558,6 +609,118 @@ exports.getIncomeCategoryMonthComparison = async (req, res) => {
     });
   } catch (err) {
     console.error('Error getting income category analytics:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* =============================
+   BULK DELETE INCOMES
+============================= */
+exports.bulkDeleteIncomes = async (req, res) => {
+  try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+
+    const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length === 0) {
+      return res.status(400).json({ error: 'No valid income IDs provided' });
+    }
+
+    const result = await Income.deleteMany({
+      _id: { $in: validIds },
+      user: req.user._id,
+    });
+
+    res.json({
+      message: `${result.deletedCount} income(s) deleted successfully`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* =============================
+   BULK RECATEGORIZE INCOMES
+============================= */
+exports.bulkRecategorize = async (req, res) => {
+  try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { ids, categoryId } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+    if (!categoryId || !mongoose.Types.ObjectId.isValid(categoryId)) {
+      return res.status(400).json({ error: 'Valid categoryId is required' });
+    }
+
+    const category = await IncomeCategory.findOne({
+      _id: categoryId,
+      user: req.user._id,
+    });
+    if (!category) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
+    const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id));
+
+    const result = await Income.updateMany(
+      { _id: { $in: validIds }, user: req.user._id },
+      { $set: { category: categoryId } }
+    );
+
+    res.json({
+      message: `${result.modifiedCount} income(s) recategorized`,
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+/* =============================
+   BULK EDIT DATE FOR INCOMES
+============================= */
+exports.bulkEditDate = async (req, res) => {
+  try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { ids, date } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids must be a non-empty array' });
+    }
+    if (!date) {
+      return res.status(400).json({ error: 'date is required' });
+    }
+
+    const utcDate = toUTCDate(date);
+    if (!utcDate || isNaN(utcDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid date format' });
+    }
+
+    const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id));
+
+    const result = await Income.updateMany(
+      { _id: { $in: validIds }, user: req.user._id },
+      { $set: { date: utcDate } }
+    );
+
+    res.json({
+      message: `${result.modifiedCount} income(s) updated`,
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };

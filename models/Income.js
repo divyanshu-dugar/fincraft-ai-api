@@ -10,7 +10,7 @@ const incomeSchema = new mongoose.Schema(
     date: { type: Date, required: true },
     category: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "IncomeCategory", // 👈 reference to ExpenseCategory model
+      ref: "IncomeCategory", // 👈 reference to IncomeCategory model
       required: true,
     },
     amount: { type: Number, required: true },

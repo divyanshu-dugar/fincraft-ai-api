@@ -330,6 +330,9 @@ exports.getForecast = async (req, res) => {
     // --- Budget risk detection ---
     const budgetRisks = [];
     for (const budget of activeBudgets) {
+      // Skip fixed expense budgets (e.g. rent, mortgage) — alerts are not useful for these
+      if (budget.isFixedExpense) continue;
+
       const catId = budget.category?._id?.toString();
       const catName = budget.category?.name || 'Unknown';
 

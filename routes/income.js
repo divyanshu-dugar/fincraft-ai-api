@@ -10,6 +10,9 @@ const {
     getIncomeStats,
     getIncomesByCategoryAndDateRange,
     getIncomeCategoryMonthComparison,
+    bulkDeleteIncomes,
+    bulkRecategorize,
+    bulkEditDate,
 } = require('../controllers/income');
 const requireAuth = require('../auth/require-auth');
 
@@ -21,6 +24,9 @@ router.get('/category/:category', requireAuth(), getIncomesByCategory);
 router.get('/category/:category/date-range', requireAuth(), getIncomesByCategoryAndDateRange);
 router.get('/:id', requireAuth(), getIncomeById);
 router.post('/', requireAuth(), addIncome);
+router.post('/bulk-delete', requireAuth(), bulkDeleteIncomes);
+router.post('/bulk-recategorize', requireAuth(), bulkRecategorize);
+router.post('/bulk-edit-date', requireAuth(), bulkEditDate);
 router.put('/:id', requireAuth(), editIncome);
 router.delete('/:id', requireAuth(), deleteIncome);
 

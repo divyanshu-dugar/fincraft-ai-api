@@ -48,6 +48,10 @@ const budgetSchema = new mongoose.Schema({
         min: 0,
         max: 100
     },
+    isFixedExpense: {
+        type: Boolean,
+        default: false
+    },
     embedding: {
         type: [Number],
         required: false

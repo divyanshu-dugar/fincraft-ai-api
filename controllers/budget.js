@@ -137,9 +137,10 @@ exports.getBudgetById = async (req, res) => {
         
         // Calculate budget status
         let status = 'on_track';
-        if (percentage > 100) {
+        if (currentSpent > proportionalBudget) {
             status = 'exceeded';
-        } else if (percentage === 100) {
+        } else if (Math.abs(currentSpent - proportionalBudget) < 0.0001 || percentage === 100) {
+            // Allow for floating point rounding
             status = 'limit_reached';
         } else if (percentage >= budget.alertThreshold) {
             status = 'almost_exceeded';
@@ -166,7 +167,7 @@ exports.addBudget = async (req, res) => {
             return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { name, amount, period, category, startDate, endDate, notifications, alertThreshold, isRecurring, repeatUntil } = req.body;
+        const { name, amount, period, category, startDate, endDate, notifications, alertThreshold, isRecurring, repeatUntil, isFixedExpense } = req.body;
 
         // Validation
         if (!name || !amount || !category || !startDate || !endDate) {
@@ -216,6 +217,7 @@ exports.addBudget = async (req, res) => {
             endDate: new Date(endDate),
             notifications: notifications !== undefined ? notifications : true,
             alertThreshold: alertThreshold || 80,
+            isFixedExpense: !!isFixedExpense,
             embedding: embeddingArray,
             isRecurring: !!isRecurring,
             repeatUntil: repeatUntil ? new Date(repeatUntil) : null,
@@ -242,7 +244,7 @@ exports.editBudget = async (req, res) => {
             return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const { name, amount, period, category, startDate, endDate, notifications, alertThreshold, isActive } = req.body;
+        const { name, amount, period, category, startDate, endDate, notifications, alertThreshold, isActive, isFixedExpense } = req.body;
         // updateScope: 'this' (default) | 'future' | 'all'
         const updateScope = req.query.updateScope || 'this';
 
@@ -258,6 +260,7 @@ exports.editBudget = async (req, res) => {
         if (notifications !== undefined)   updateObj.notifications  = notifications;
         if (alertThreshold)                updateObj.alertThreshold = alertThreshold;
         if (isActive !== undefined)        updateObj.isActive       = isActive;
+        if (isFixedExpense !== undefined)   updateObj.isFixedExpense = isFixedExpense;
 
         // Always update this specific budget
         const budget = await Budget.findOneAndUpdate(
@@ -270,12 +273,21 @@ exports.editBudget = async (req, res) => {
             return res.status(404).json({ message: 'Budget not found' });
         }
 
+        // isFixedExpense is a category-level trait — propagate to all budgets for this category
+        if (isFixedExpense !== undefined && budget.category?._id) {
+            await Budget.updateMany(
+                { user: req.user._id, category: budget.category._id, _id: { $ne: budget._id } },
+                { isFixedExpense }
+            );
+        }
+
         // For recurring propagation, only carry over semantic fields (not dates/period)
         const propagateFields = {};
         if (name)                        propagateFields.name           = name;
         if (amount)                      propagateFields.amount         = amount;
         if (notifications !== undefined) propagateFields.notifications  = notifications;
         if (alertThreshold)              propagateFields.alertThreshold = alertThreshold;
+        if (isFixedExpense !== undefined) propagateFields.isFixedExpense = isFixedExpense;
 
         if (budget.isRecurring && Object.keys(propagateFields).length > 0 && updateScope !== 'this') {
             if (updateScope === 'future') {
@@ -453,9 +465,9 @@ exports.getBudgetStats = async (req, res) => {
                 
                 // Calculate budget status
                 let status = 'on_track';
-                if (percentage > 100) {
+                if (currentSpent > budget.amount) {
                     status = 'exceeded';
-                } else if (percentage === 100) {
+                } else if (Math.abs(currentSpent - budget.amount) < 0.0001 || percentage === 100) {
                     status = 'limit_reached';
                 } else if (percentage >= budget.alertThreshold) {
                     status = 'almost_exceeded';
@@ -566,8 +578,8 @@ exports.checkBudgetAlerts = async (req, res) => {
                         }).catch((err) => console.error('[BudgetAlert email error]', err.message));
                     }
                 }
-            } else if (percentage === 100) {
-                // Budget limit reached (exactly 100%)
+            } else if (percentage === 100 && !budget.isFixedExpense) {
+                // Budget limit reached (exactly 100%) — skip for fixed expenses
                 const existingAlert = await BudgetAlert.findOne({
                     budget: budget._id,
                     type: 'budget_limit_reached',
@@ -597,8 +609,8 @@ exports.checkBudgetAlerts = async (req, res) => {
                         }).catch((err) => console.error('[BudgetAlert email error]', err.message));
                     }
                 }
-            } else if (percentage >= budget.alertThreshold) {
-                // Budget almost exceeded (80-99%)
+            } else if (percentage >= budget.alertThreshold && !budget.isFixedExpense) {
+                // Budget almost exceeded (80-99%) — skip for fixed expenses
                 const existingAlert = await BudgetAlert.findOne({
                     budget: budget._id,
                     type: 'budget_almost_exceeded',
@@ -744,19 +756,23 @@ function calcNextPeriod(period, endDate) {
         // Start the day after the current end
         nextStart = new Date(end);
         nextStart.setUTCDate(nextStart.getUTCDate() + 1);
+        nextStart.setUTCHours(0, 0, 0, 0); // normalize to midnight UTC
         nextEnd = new Date(nextStart);
         nextEnd.setUTCDate(nextEnd.getUTCDate() + 6);
+        nextEnd.setUTCHours(23, 59, 59, 999); // end of day UTC
     } else if (period === 'monthly') {
         // First day of the next month
         const year  = end.getUTCFullYear();
         const month = end.getUTCMonth(); // 0-indexed; end is already last day of its month
         nextStart = new Date(Date.UTC(year, month + 1, 1));
         nextEnd   = new Date(Date.UTC(year, month + 2, 0)); // last day of that next month
+        nextEnd.setUTCHours(23, 59, 59, 999); // end of day UTC
     } else {
         // yearly
         const year = end.getUTCFullYear() + 1;
         nextStart  = new Date(Date.UTC(year, 0,  1));
         nextEnd    = new Date(Date.UTC(year, 11, 31));
+        nextEnd.setUTCHours(23, 59, 59, 999); // end of day UTC
     }
 
     return { nextStart, nextEnd };

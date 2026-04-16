@@ -8,13 +8,18 @@ const appleSignin = require('apple-signin-auth');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const REFRESH_COOKIE_NAME = 'refresh_token';
-const REFRESH_COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict',
-  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
-  path: '/api/auth',
-};
+const REFRESH_TTL_DEFAULT = 30 * 24 * 60 * 60 * 1000; // 30 days
+const REFRESH_TTL_REMEMBER = 90 * 24 * 60 * 60 * 1000; // 90 days
+
+function refreshCookieOptions(rememberMe = false) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: rememberMe ? REFRESH_TTL_REMEMBER : REFRESH_TTL_DEFAULT,
+    path: '/api/auth',
+  };
+}
 
 function signAccessToken(payload) {
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
@@ -60,7 +65,7 @@ exports.registerUser = async (req, res) => {
 // Login User
 exports.loginUser = async (req, res) => {
   try {
-    const { userName, password } = req.body;
+    const { userName, password, rememberMe } = req.body;
 
     const user = await User.findOne({ userName });
     if (!user) return res.status(404).json({ message: "User not found" });
@@ -85,10 +90,11 @@ exports.loginUser = async (req, res) => {
     const token = signAccessToken(payload);
 
     // Long-lived refresh token stored as httpOnly cookie
-    const rawRefresh = user.createRefreshToken();
+    const ttl = rememberMe ? REFRESH_TTL_REMEMBER : REFRESH_TTL_DEFAULT;
+    const rawRefresh = user.createRefreshToken(ttl);
     await user.save({ validateBeforeSave: false });
 
-    res.cookie(REFRESH_COOKIE_NAME, rawRefresh, REFRESH_COOKIE_OPTIONS);
+    res.cookie(REFRESH_COOKIE_NAME, rawRefresh, refreshCookieOptions(!!rememberMe));
     res.json({ message: "Login successful", token, role: user.role });
   } catch (error) {
     res.status(500).json({ message: "Login failed", error: error.message });
@@ -111,13 +117,17 @@ exports.refreshAccessToken = async (req, res) => {
 
     if (!user) {
       // Possible token reuse — clear the cookie regardless
-      res.clearCookie(REFRESH_COOKIE_NAME, { ...REFRESH_COOKIE_OPTIONS, maxAge: 0 });
+      res.clearCookie(REFRESH_COOKIE_NAME, { ...refreshCookieOptions(), maxAge: 0 });
       return res.status(401).json({ message: "Refresh token is invalid or expired" });
     }
 
     // Rotate: remove the used token, issue a new one
+    // Preserve the remaining TTL from the original token
+    const usedToken = user.refreshTokens.find((t) => t.tokenHash === tokenHash);
+    const remainingTtl = usedToken ? usedToken.expiresAt - Date.now() : REFRESH_TTL_DEFAULT;
+    const ttl = Math.max(remainingTtl, REFRESH_TTL_DEFAULT);
     user.refreshTokens = user.refreshTokens.filter((t) => t.tokenHash !== tokenHash);
-    const rawRefresh = user.createRefreshToken();
+    const rawRefresh = user.createRefreshToken(ttl);
     await user.save({ validateBeforeSave: false });
 
     const payload = {
@@ -127,7 +137,8 @@ exports.refreshAccessToken = async (req, res) => {
     };
     const token = signAccessToken(payload);
 
-    res.cookie(REFRESH_COOKIE_NAME, rawRefresh, REFRESH_COOKIE_OPTIONS);
+    const isRememberMe = ttl > REFRESH_TTL_DEFAULT;
+    res.cookie(REFRESH_COOKIE_NAME, rawRefresh, refreshCookieOptions(isRememberMe));
     res.json({ token });
   } catch (error) {
     res.status(500).json({ message: "Token refresh failed", error: error.message });
@@ -145,7 +156,7 @@ exports.logoutUser = async (req, res) => {
         { $pull: { refreshTokens: { tokenHash } } }
       );
     }
-    res.clearCookie(REFRESH_COOKIE_NAME, { ...REFRESH_COOKIE_OPTIONS, maxAge: 0 });
+    res.clearCookie(REFRESH_COOKIE_NAME, { ...refreshCookieOptions(), maxAge: 0 });
     res.json({ message: "Logged out successfully" });
   } catch (error) {
     res.status(500).json({ message: "Logout failed", error: error.message });
@@ -275,15 +286,7 @@ async function handleOAuthUser(req, res, { provider, providerId, email, name, av
   const rawRefresh = user.createRefreshToken();
   await user.save({ validateBeforeSave: false });
 
-  const REFRESH_COOKIE_OPTIONS = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-    path: '/api/auth',
-  };
-
-  res.cookie('refresh_token', rawRefresh, REFRESH_COOKIE_OPTIONS);
+  res.cookie('refresh_token', rawRefresh, refreshCookieOptions());
   res.json({ message: 'OAuth login successful', token, role: user.role });
 }
 
