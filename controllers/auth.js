@@ -17,7 +17,7 @@ function refreshCookieOptions(rememberMe = false) {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
     maxAge: rememberMe ? REFRESH_TTL_REMEMBER : REFRESH_TTL_DEFAULT,
-    path: '/api/auth',
+    path: '/api/v1/auth',
   };
 }
 

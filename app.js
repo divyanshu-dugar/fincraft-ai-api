@@ -89,19 +89,19 @@ app.get('/', (req, res) => {
   res.send("Server running!");
 });
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/profile', profileRoutes);
-app.use('/expenses', expense);
-app.use('/expense-categories', expenseCategory);
-app.use('/income', income);
-app.use('/income-categories', incomeCategory);
-app.use('/saving-goals', savingsGoalList);
-app.use('/budgets', budgetRoutes);
-app.use('/recurring-expenses', recurringExpenseRoutes);
-app.use('/recurring-incomes', recurringIncomeRoutes);
-app.use('/cash-flow-forecast', cashFlowForecastRoutes);
-app.use('/api', analytics); 
-app.use('/api', aiChat); // ✅ New AI route
+// API Routes — all mounted under /api/v1/* for versioning
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/profile', profileRoutes);
+app.use('/api/v1/expenses', expense);
+app.use('/api/v1/expense-categories', expenseCategory);
+app.use('/api/v1/income', income);
+app.use('/api/v1/income-categories', incomeCategory);
+app.use('/api/v1/saving-goals', savingsGoalList);
+app.use('/api/v1/budgets', budgetRoutes);
+app.use('/api/v1/recurring-expenses', recurringExpenseRoutes);
+app.use('/api/v1/recurring-incomes', recurringIncomeRoutes);
+app.use('/api/v1/cash-flow-forecast', cashFlowForecastRoutes);
+app.use('/api/v1', analytics);
+app.use('/api/v1', aiChat);
 
 module.exports = app;
