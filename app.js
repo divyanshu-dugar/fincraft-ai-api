@@ -89,6 +89,9 @@ app.get('/', (req, res) => {
   res.send("Server running!");
 });
 
+const mongoose = require('mongoose');
+const { version } = require('./package.json');
+
 // API Routes — all mounted under /api/v1/* for versioning
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/profile', profileRoutes);
@@ -103,5 +106,17 @@ app.use('/api/v1/recurring-incomes', recurringIncomeRoutes);
 app.use('/api/v1/cash-flow-forecast', cashFlowForecastRoutes);
 app.use('/api/v1', analytics);
 app.use('/api/v1', aiChat);
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+  res.json({
+    status: 'ok',
+    database: dbStatus,
+    uptime: process.uptime(),
+    version: version,
+    timestamp: new Date().toISOString()
+  });
+});
 
 module.exports = app;
