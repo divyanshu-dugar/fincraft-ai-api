@@ -1,6 +1,7 @@
 const express = require("express")
 const router = express.Router()
 const aiChatController = require('../controllers/aiChat');
+const aiInsightsController = require('../controllers/aiInsights');
 const requireAuth = require('../auth/require-auth');
 
 const authenticate = requireAuth();
@@ -19,5 +20,8 @@ router.post("/chat-message", authenticate, aiChatController.sendMessage);
 
 // Delete a chat session
 router.delete("/chat-sessions/:sessionId", authenticate, aiChatController.deleteChatSession);
+
+// Generate one-shot insights + recommendations for the analytics page view
+router.post("/ai-analytics-insights", authenticate, aiInsightsController.generateAnalyticsInsights);
 
 module.exports = router;
