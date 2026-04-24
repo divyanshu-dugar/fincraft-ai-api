@@ -115,6 +115,7 @@ app.get('/api/health', (req, res) => {
     database: dbStatus,
     uptime: process.uptime(),
     version: version,
+    nodeEnv: process.env.NODE_ENV || '(unset)',
     timestamp: new Date().toISOString()
   });
 });

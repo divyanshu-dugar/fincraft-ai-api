@@ -12,17 +12,27 @@ const REFRESH_TTL_DEFAULT = 30 * 24 * 60 * 60 * 1000; // 30 days
 const REFRESH_TTL_REMEMBER = 90 * 24 * 60 * 60 * 1000; // 90 days
 
 function refreshCookieOptions(rememberMe = false) {
+  const isProd = process.env.NODE_ENV === 'production';
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    secure: isProd,
+    // In prod, the SPA (fincraft-ai.app) and API (different origin) are
+    // cross-site, so sameSite must be 'none' for the refresh cookie to be
+    // sent with /auth/refresh calls. 'none' requires secure=true, which
+    // prod has. In dev (http://localhost) we fall back to 'lax'.
+    sameSite: isProd ? 'none' : 'lax',
     maxAge: rememberMe ? REFRESH_TTL_REMEMBER : REFRESH_TTL_DEFAULT,
     path: '/api/v1/auth',
   };
 }
 
 function signAccessToken(payload) {
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
+  // 7 days. The silent-refresh flow still rotates the access token on each
+  // authFetch, but a 7-day TTL means mobile Safari's ITP or transient network
+  // hiccups won't immediately boot the user to /login. The refresh cookie
+  // (30d default / 90d remember-me) remains the source of truth for session
+  // length.
+  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
 }
 
 function hashToken(raw) {
