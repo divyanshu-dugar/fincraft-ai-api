@@ -103,7 +103,9 @@ exports.getBudgets = async (req, res) => {
                     ...budget.toObject(),
                     currentSpent,
                     percentage: Math.min(percentage, 100),
-                    remaining: Math.max(proportionalBudget - currentSpent, 0),
+                    // Return the raw signed value so the UI can distinguish
+                    // "Remaining" (positive) from "Over" (negative)
+                    remaining: proportionalBudget - currentSpent,
                     status,
                     dateStatus,
                     proportionalBudget,
@@ -359,8 +361,11 @@ exports.deleteBudget = async (req, res) => {
             return res.status(404).json({ message: 'Budget not found' });
         }
 
-        // If cascade=true, recursively delete all future successors first
-        if (req.query.cascade === 'true' && budget.isRecurring) {
+        // If cascade=true, recursively delete all future successors first.
+        // Note: we do NOT require isRecurring to be set here — a rolled-over child
+        // may have isRecurring=true or false depending on how it was created, but
+        // the user explicitly chose cascade so we always honour it.
+        if (req.query.cascade === 'true') {
             const deleteChain = async (parentId) => {
                 const children = await Budget.find({ parentBudgetId: parentId, user: req.user._id });
                 for (const child of children) {
@@ -467,13 +472,15 @@ exports.getBudgetStats = async (req, res) => {
                 const proportionalBudget = (budget.amount * queryDays) / budgetTotalDays;
                 
                 const percentage = proportionalBudget > 0 ? (spentAmount / proportionalBudget) * 100 : 0;
-                const remaining = Math.max(proportionalBudget - spentAmount, 0);
+                // Return the raw signed value so the UI can distinguish overspend
+                const remaining = proportionalBudget - spentAmount;
                 
-                // Calculate budget status
+                // Calculate budget status — use spentAmount (scalar), not the
+                // aggregate array which is always truthy and broke 'exceeded' detection
                 let status = 'on_track';
-                if (currentSpent > budget.amount) {
+                if (spentAmount > proportionalBudget) {
                     status = 'exceeded';
-                } else if (Math.abs(currentSpent - budget.amount) < 0.0001 || percentage === 100) {
+                } else if (Math.abs(spentAmount - proportionalBudget) < 0.0001 || percentage === 100) {
                     status = 'limit_reached';
                 } else if (percentage >= budget.alertThreshold) {
                     status = 'almost_exceeded';
